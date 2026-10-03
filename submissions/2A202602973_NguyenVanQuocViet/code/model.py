@@ -1,14 +1,16 @@
 """model.py - tạo backbone, đóng băng, nhóm tham số, đếm params/GMAC.
 
-PSEUDO-CODE: bạn tự hoàn thiện mọi hàm có `raise NotImplementedError`.
-
-Giao diện bạn phải giữ:
+Giao diện:
     build_model(name, pretrained, num_classes, drop_rate, init) -> nn.Module
     freeze_backbone(model)                                        -> None
+    set_train_mode(model)                                         -> None (giữ BN ở eval nếu đóng băng)
     param_groups(model, lr_backbone, lr_head, weight_decay)       -> list[dict] cho optimizer
     count_params(model) -> float (triệu)     count_gmacs(model, img_size) -> float
 """
 from __future__ import annotations
+
+import torch
+from torch import nn
 
 # Gợi ý backbone (GUIDE.md mục 2.1). Tag trọng số của timm có thể đổi theo phiên bản:
 # dùng timm.list_pretrained("resnet50*") để xem, và GHI LẠI tag bạn dùng trong results.xlsx.
@@ -21,61 +23,106 @@ SUGGESTED_BACKBONES = {
     "efficientnet_b0": "efficientnet_b0",        # mạng nhẹ
     "mobilenetv3": "mobilenetv3_large_100",      # mạng nhẹ
 }
+INIT_CHOICES = ("scratch", "frozen", "finetune")
 
 
 def build_model(name: str, pretrained: bool = True, num_classes: int = 9,
                 drop_rate: float = 0.0, init: str = "finetune"):
-    """Tạo model phân loại 9 lớp.
+    """Tạo model phân loại 9 lớp qua timm (head mới khởi tạo ngẫu nhiên).
 
-    `init` (trục A của GUIDE.md mục 3):
-      - "scratch"  : pretrained=False, huấn luyện toàn bộ
-      - "frozen"   : pretrained=True, đóng băng backbone, chỉ train head
-      - "finetune" : pretrained=True, train toàn bộ
-
-    TODO:
-      - timm.create_model(name, pretrained=..., num_classes=num_classes, drop_rate=...)
-        (timm tự thay head mới; head khởi tạo ngẫu nhiên)
-      - nếu init == "frozen": gọi freeze_backbone(model)
-      - ghi lại tên tag trọng số thực sự được tải (model.pretrained_cfg)
+    `init` (trục A): "scratch" (không tiền huấn luyện) | "frozen" (chỉ train head) | "finetune".
+    Gắn thêm `model.weights_tag` (vd "resnet50.a1_in1k" hoặc "scratch") để ghi vào results.xlsx.
     """
-    raise NotImplementedError("TODO")
+    import timm  # import trong hàm: các hàm còn lại (và test) dùng được khi chưa cài timm
+
+    if init not in INIT_CHOICES:
+        raise ValueError(f"init={init!r} không hợp lệ, chọn trong {INIT_CHOICES}")
+    use_pretrained = pretrained and init != "scratch"
+    model = timm.create_model(name, pretrained=use_pretrained, num_classes=num_classes, drop_rate=drop_rate)
+
+    cfg = getattr(model, "pretrained_cfg", {}) or {}
+    tag = cfg.get("tag")
+    model.weights_tag = (f"{cfg.get('architecture', name)}.{tag}" if tag else name) if use_pretrained else "scratch"
+    model.frozen_backbone = False
+    if init == "frozen":
+        freeze_backbone(model)
+    return model
+
+
+def _head_param_ids(model) -> set[int]:
+    return {id(p) for p in model.get_classifier().parameters()}
 
 
 def freeze_backbone(model) -> None:
-    """Đóng băng mọi tham số trừ head.
+    """Đóng băng mọi tham số trừ head (model.get_classifier()).
 
-    TODO:
-      - requires_grad = False cho tham số backbone; head (model.get_classifier()) vẫn train
-      - lưu ý (GUIDE.md mục 3.2): backbone đóng băng thì BatchNorm cũng phải ở chế độ eval.
-        Hãy nghĩ nơi nào trong train loop phải gọi lại model.train() mà vẫn giữ BN ở eval.
+    BatchNorm của backbone đóng băng phải ở chế độ eval, nếu không running_mean/var vẫn bị cập nhật
+    theo dữ liệu mới trong khi trọng số conv giữ nguyên -> lệch phân phối. Train loop gọi
+    set_train_mode(model) thay cho model.train() để giữ điều này.
     """
-    raise NotImplementedError("TODO")
+    head = _head_param_ids(model)
+    for p in model.parameters():
+        p.requires_grad = id(p) in head
+    model.frozen_backbone = True
+
+
+def set_train_mode(model) -> None:
+    """model.train(); nếu backbone đóng băng thì đưa mọi module không thuộc head về eval (BN, dropout)."""
+    model.train()
+    if getattr(model, "frozen_backbone", False):
+        head_modules = set(model.get_classifier().modules())
+        for m in model.modules():
+            if m is not model and m not in head_modules:
+                m.eval()
 
 
 def param_groups(model, lr_backbone: float, lr_head: float, weight_decay: float):
     """Chia tham số thành 3 nhóm như slide Day 2, trang 52.
 
-    - backbone có ndim > 1: lr = lr_backbone, weight_decay = weight_decay
-    - norm và bias của backbone (ndim <= 1): lr = lr_backbone, weight_decay = 0
-    - head mới: lr = lr_head (thường gấp 10 lần backbone), weight_decay = weight_decay
-
-    TODO:
-      - bỏ qua tham số requires_grad == False
-      - trả về list[dict] dạng {"params": [...], "lr": ..., "weight_decay": ...}
-      - (trục E) mở rộng: LR theo tầng nếu bạn muốn thử
+    - backbone, ndim > 1           : lr_backbone, weight_decay
+    - backbone norm/bias (ndim <= 1): lr_backbone, weight_decay = 0
+    - head mới                     : lr_head, weight_decay
+    Bỏ qua tham số requires_grad == False và nhóm rỗng.
     """
-    raise NotImplementedError("TODO")
+    head = _head_param_ids(model)
+    decay, no_decay, head_params = [], [], []
+    for p in model.parameters():
+        if not p.requires_grad:
+            continue
+        if id(p) in head:
+            head_params.append(p)
+        elif p.ndim <= 1:
+            no_decay.append(p)
+        else:
+            decay.append(p)
+    groups = [
+        {"params": decay, "lr": lr_backbone, "weight_decay": weight_decay, "name": "backbone"},
+        {"params": no_decay, "lr": lr_backbone, "weight_decay": 0.0, "name": "backbone_no_decay"},
+        {"params": head_params, "lr": lr_head, "weight_decay": weight_decay, "name": "head"},
+    ]
+    return [g for g in groups if g["params"]]
 
 
 def count_params(model) -> float:
-    """Số tham số (triệu), đếm cả tham số bị đóng băng. TODO."""
-    raise NotImplementedError("TODO")
+    """Số tham số (triệu), đếm cả tham số bị đóng băng."""
+    return sum(p.numel() for p in model.parameters()) / 1e6
 
 
+@torch.no_grad()
 def count_gmacs(model, img_size: int = 224) -> float:
-    """GMAC cho một ảnh 3 x img_size x img_size (slide tính MAC, không phải FLOPs 2x).
+    """GMAC cho một ảnh 3 x img_size x img_size.
 
-    TODO: dùng thư viện đếm (fvcore, ptflops, thop...) hoặc tự đếm bằng hook.
-    Ghi rõ công cụ đã dùng; số có thể lệch vài phần trăm giữa các công cụ.
+    Công cụ: torch.utils.flop_counter.FlopCounterMode (có sẵn trong PyTorch >= 2.1), đếm FLOPs của
+    conv, linear, matmul và attention; GMAC = FLOPs / 2. Có thể lệch vài % so với fvcore/ptflops.
     """
-    raise NotImplementedError("TODO")
+    from torch.utils.flop_counter import FlopCounterMode
+
+    was_training = model.training
+    model.eval()
+    device = next(model.parameters()).device
+    x = torch.zeros(1, 3, img_size, img_size, device=device)
+    counter = FlopCounterMode(display=False)
+    with counter:
+        model(x)
+    model.train(was_training)
+    return counter.get_total_flops() / 2 / 1e9
