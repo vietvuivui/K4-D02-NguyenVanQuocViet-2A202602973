@@ -245,6 +245,20 @@ class TestDataAndEvaluate(unittest.TestCase):
                 counts += np.bincount(y.numpy(), minlength=2)
         self.assertAlmostEqual(counts[1] / counts.sum(), 0.5, delta=0.05)
 
+    def test_check_split_detects_relabel(self):
+        """S1: nhãn trong file split khác labels.csv gốc -> check_split phải dừng."""
+        ref = self.df.copy()
+        bad = self.df.copy()
+        bad.loc[0, "Label"] = (bad.loc[0, "Label"] + 1) % 9
+        old, D.TOTAL_IMAGES = D.TOTAL_IMAGES, len(self.df)  # dữ liệu giả 40 ảnh thay vì 17.509
+        try:
+            with self.assertRaisesRegex(AssertionError, "labels.csv"):
+                D.check_split(bad.iloc[:20], bad.iloc[20:30], bad.iloc[30:], self.img, verbose=False, labels_df=ref)
+            stats = D.check_split(ref.iloc[:20], ref.iloc[20:30], ref.iloc[30:], self.img, verbose=False, labels_df=ref)
+            self.assertEqual(stats["label_mismatch"], 0)
+        finally:
+            D.TOTAL_IMAGES = old
+
     def test_check_split_detects_leak(self):
         tr, va, te = self.df.iloc[:20], self.df.iloc[19:30], self.df.iloc[30:]
         with self.assertRaises(AssertionError):

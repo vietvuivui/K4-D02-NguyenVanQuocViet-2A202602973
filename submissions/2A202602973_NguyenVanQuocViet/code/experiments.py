@@ -33,12 +33,14 @@ INFER_MIN_GAIN = 0.002    # phương pháp suy luận phải hơn I00 ít nhất
 LATENCY_BUDGET_MS = 100.0  # ngân sách thời gian thực, p95 batch 1 (slide trang 61)
 RARE = {"Chinee Apple": 0, "Snake Weed": 7}
 
+# Ghim tag trọng số (timm "kiến_trúc.tag"): tag mặc định đổi theo phiên bản timm, và mặc định của convnext_tiny
+# là in12k_ft_in1k (tiền huấn luyện ImageNet-12k) -> không công bằng. Tất cả dưới đây chỉ dùng ImageNet-1k.
 BACKBONES = [
-    ("B01", "resnet50"),                  # ResNet (mốc)
-    ("B02", "convnext_tiny"),             # ConvNeXt
-    ("B03", "deit_small_patch16_224"),    # transformer
-    ("B04", "efficientnet_b0"),           # nhẹ
-    ("B05", "mobilenetv3_large_100"),     # nhẹ
+    ("B01", "resnet50.a1_in1k"),                   # ResNet (mốc)
+    ("B02", "convnext_tiny.fb_in1k"),              # ConvNeXt
+    ("B03", "deit_small_patch16_224.fb_in1k"),     # transformer
+    ("B04", "efficientnet_b0.ra_in1k"),            # nhẹ
+    ("B05", "mobilenetv3_large_100.ra_in1k"),      # nhẹ
 ]
 
 # (exp_id, trục, mô tả "khác T00 ở điểm nào", ghi đè Config). Mỗi dòng khác T00 đúng MỘT yếu tố.
@@ -170,9 +172,57 @@ def step1_backbones(paths: dict, device, backbones=BACKBONES, **overrides) -> pd
             _empty_cache()
         rows.append({**s, "img_size": cfg.img_size, "epochs": cfg.epochs})
     df = pd.DataFrame(rows)
+    df["note"] = ("công thức nền T00, seed 0, 1 seed; độ trễ sơ bộ FP32 batch 1 (warmup 10, 100 lần); "
+                  "GMAC đếm bằng torch FlopCounterMode (FLOPs/2)")
     return df[["exp_id", "backbone", "weights_tag", "params_M", "gmacs", "img_size", "epochs", "seed",
                "best_epoch", "val_macro_f1", "val_top1", "val_balanced_acc", "train_time_per_epoch_s",
-               "latency_b1_p50_ms", "latency_b1_p95_ms", "latency_gpu"]]
+               "latency_b1_p50_ms", "latency_b1_p95_ms", "latency_gpu", "note"]]
+
+
+def backbone_analysis(bb_df: pd.DataFrame, paths: dict, overfit_tol: float = 0.05) -> tuple[pd.DataFrame, dict]:
+    """Thêm cột phân tích từ history.csv của mỗi B0x và tính tương quan FLOPs với thời gian/độ trễ.
+
+    - epochs_to_99pct: epoch đầu tiên đạt >= 99% macro-F1 val tốt nhất (hội tụ nhanh hay chậm)
+    - val_loss_min_epoch, val_loss_rise: val loss ở epoch cuối trừ val loss nhỏ nhất
+    - overfit: val loss tăng > overfit_tol sau điểm thấp nhất trong khi train loss vẫn giảm
+    Tương quan Spearman (thứ hạng, 5 điểm nên chỉ mang tính tham khảo).
+    """
+    df = bb_df.copy()
+    extra = []
+    for r in df.itertuples():
+        h = pd.read_csv(Path(paths["out_dir"]) / r.exp_id / "seed0" / "history.csv")
+        best = h["val_macro_f1"].max()
+        i_min = int(h["val_loss"].idxmin())
+        rise = float(h["val_loss"].iloc[-1] - h["val_loss"].iloc[i_min])
+        train_falls = bool(h["train_loss"].iloc[-1] < h["train_loss"].iloc[i_min])
+        extra.append({"epochs_to_99pct": int(h.loc[h["val_macro_f1"] >= 0.99 * best, "epoch"].iloc[0]),
+                      "val_loss_min_epoch": int(h["epoch"].iloc[i_min]), "val_loss_rise": rise,
+                      "overfit": bool(rise > overfit_tol and train_falls),
+                      "train_val_gap_last": float(h["val_loss"].iloc[-1] - h["train_loss"].iloc[-1])})
+    df = pd.concat([df.reset_index(drop=True), pd.DataFrame(extra)], axis=1)
+    corr = {f"spearman(GMAC, {c})": float(df["gmacs"].corr(df[c], method="spearman"))
+            for c in ("latency_b1_p50_ms", "train_time_per_epoch_s")}
+    corr["spearman(params, latency_b1_p50_ms)"] = float(df["params_M"].corr(df["latency_b1_p50_ms"], method="spearman"))
+    return df, corr
+
+
+def plot_backbone_curves(bb_df: pd.DataFrame, paths: dict, path: str | Path) -> None:
+    """Chồng macro-F1 val và val loss theo epoch của mọi backbone: so tốc độ hội tụ và quá khớp."""
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(1, 2, figsize=(12, 4))
+    for r in bb_df.itertuples():
+        h = pd.read_csv(Path(paths["out_dir"]) / r.exp_id / "seed0" / "history.csv")
+        ax[0].plot(h["epoch"], h["val_macro_f1"], "o-", ms=3, label=f"{r.exp_id} {r.backbone}")
+        ax[1].plot(h["epoch"], h["val_loss"], "o-", ms=3, label=f"{r.exp_id}")
+    ax[0].set(xlabel="epoch", ylabel="macro-F1 val", title="Hội tụ: macro-F1 val theo epoch")
+    ax[1].set(xlabel="epoch", ylabel="val loss (CE)", title="Quá khớp: val loss theo epoch")
+    for a in ax:
+        a.grid(alpha=0.3)
+        a.legend(fontsize=7)
+    fig.tight_layout()
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
 
 
 def select_backbone(bb_df: pd.DataFrame, override: str | None = None) -> tuple[str, str]:
@@ -531,8 +581,21 @@ def step4_final(paths: dict, backbone: str, recipe: dict, method_code: str, pred
     return out
 
 
-def final_table(pred_dir: str | Path, groups=("F01", "T00", "F01rt", "F01uncal")) -> pd.DataFrame:
-    """Bảng Final: mỗi seed một dòng + dòng mean ± std, tính từ file dự đoán bằng eval.compute_metrics."""
+def final_configs(backbone: str, recipe_id: str, recipe: dict, method: str) -> dict:
+    """Mô tả cấu hình (backbone + công thức + suy luận) của từng nhóm trong sheet Final."""
+    rec = f"{recipe_id} {recipe}" if recipe else "T00 (công thức nền)"
+    meth = METHODS[method]["label"]
+    return {"F01": f"{backbone} + {rec} + {method} ({meth}) + temperature scaling",
+            "F01uncal": f"{backbone} + {rec} + {method} ({meth}), chưa temperature scaling",
+            "F01rt": f"{backbone} + {rec} + I00 (1 view) + temperature scaling [thời gian thực]",
+            "T00": f"{backbone} + T00 (công thức nền) + I00 (1 view) [mốc]"}
+
+
+def final_table(pred_dir: str | Path, groups=("F01", "T00", "F01rt", "F01uncal"),
+                configs: dict | None = None) -> pd.DataFrame:
+    """Bảng Final: mỗi seed một dòng + dòng mean ± std, tính từ file dự đoán bằng eval.compute_metrics.
+    configs: {nhóm: mô tả cấu hình} (xem final_configs)."""
+    configs = configs or {}
     import eval as ev
     pred_dir = Path(pred_dir)
     rows = []
@@ -549,14 +612,14 @@ def final_table(pred_dir: str | Path, groups=("F01", "T00", "F01rt", "F01uncal")
             if vf.exists():
                 pv = ev.read_pred(str(vf))
                 mv = compute_metrics(pv.y_true, pv.y_pred, pv.probs)
-            r = {"exp_id": g, "seed": p.seed, "val_macro_f1": mv["macro_f1"] if mv else np.nan,
+            r = {"exp_id": g, "config": configs.get(g, ""), "seed": p.seed, "val_macro_f1": mv["macro_f1"] if mv else np.nan,
                  "test_macro_f1": mt["macro_f1"], "test_top1": mt["top1"], "test_balanced_acc": mt["balanced_acc"],
                  "test_ece": mt["ece"], **{f"test_recall_{k.split()[0].lower()}": mt["recall"][i] for k, i in RARE.items()}}
             per.append(r)
         rows += per
-        agg = {"exp_id": g, "seed": f"mean ± std ({len(per)} seed)"}
+        agg = {"exp_id": g, "config": configs.get(g, ""), "seed": f"mean ± std ({len(per)} seed)"}
         for k in per[0]:
-            if k in ("exp_id", "seed"):
+            if k in ("exp_id", "config", "seed"):
                 continue
             mu, sd = mean_std([r[k] for r in per])
             agg[k] = f"{mu:.4f} ± {sd:.4f}"
@@ -797,16 +860,27 @@ REPORT_TEMPLATE = """# Báo cáo Lab Day 2 — DeepWeeds · Nguyễn Văn Quốc
   channels_last, chọn checkpoint theo macro-F1 val (hòa lấy epoch sớm hơn).
 - Val/test: resize 256 → center crop 224, chuẩn hoá theo mean/std của trọng số. Seed 0 cho quét sàng; 0, 1, 2 cho chung kết.
 - Môi trường: {env}.
-- TODO: chèn biểu đồ phân bố lớp và ảnh mẫu từ notebook (Bước 0); nhận xét mất cân bằng và cặp loài dễ nhầm.
+{pipeline_md}- TODO: chèn biểu đồ phân bố lớp và ảnh mẫu từ notebook (Bước 0); nhận xét mất cân bằng và cặp loài dễ nhầm.
 
 ## 3. So sánh backbone (Bước 1, 1 seed)
 {bb_table}
 
+Phân tích tự động từ `history.csv` (epochs_to_99pct: epoch đầu đạt 99% macro-F1 tốt nhất; overfit: val loss
+tăng > 0,05 sau điểm thấp nhất trong khi train loss vẫn giảm):
+
+{bb_analysis}
+
+Tương quan thứ hạng (5 backbone, chỉ tham khảo): {bb_corr}
+
 ![backbones](figures/backbones.png)
+
+![backbone curves](figures/backbones_curves.png)
 
 **Lựa chọn (quy tắc trên val):** {why_bb}
 
-TODO: hội tụ, quá khớp (xem `curves/B0x_*.png`), thứ hạng so với ImageNet, FLOPs có dự đoán độ trễ không.
+TODO: backbone nào hội tụ nhanh nhất / có overfit không (bảng trên + `curves/B0x_*.png`); thứ hạng trên DeepWeeds so
+với ImageNet; FLOPs có dự đoán được thời gian train và độ trễ không (tương quan trên; slide trang 43). Ghi rõ đây là
+kết quả 1 seed: chênh lệch < {noise} macro-F1 là không phân biệt được.
 
 ## 4. Công thức huấn luyện (Bước 2, 1 seed, ngưỡng nhiễu {noise})
 {tr_table}
@@ -873,6 +947,7 @@ TODO: lớp còn nhầm nhiều nhất và giả thuyết (xem ảnh sai Chinee 
 
 
 def write_report_draft(path: str | Path, *, env: dict, split_stats: dict | None, backbone: str, bb_df, why_bb,
+                       pipeline_checks: dict | None = None, bb_corr: dict | None = None,
                        tr_df, why_combo, recipe_id: str, why_recipe, inf_df, method: str, why_inf, fin_df, pc_df,
                        rt_p95: float, rt_src: str, epochs: int, grade_text: str = "", overwrite: bool = False) -> Path:
     """Bản nháp report.md theo dàn ý GUIDE mục 6.3: điền sẵn BẢNG SỐ LIỆU thật và lý do chọn cấu hình;
@@ -889,18 +964,30 @@ def write_report_draft(path: str | Path, *, env: dict, split_stats: dict | None,
                     f"test {split_stats['n']['test']} ("
                     + ", ".join(f"{k} {v:.2%}" for k, v in split_stats["frac"].items())
                     + f"). Giao từng cặp: {split_stats['overlap']}; hợp ba tập: {split_stats['union']}; "
-                    f"file thiếu: {split_stats['missing']}.\n")
+                    f"file thiếu: {split_stats['missing']}; nhãn lệch labels.csv gốc: {split_stats.get('label_mismatch')}.\n"
+                    f"- Tỉ lệ lớp nhiều nhất / ít nhất: {split_stats.get('imbalance_ratio', float('nan')):.2f}. "
+                    "Số ảnh mỗi lớp trong từng tập:\n\n"
+                    + md_table(pd.DataFrame(split_stats["per_class"]).rename_axis("lớp").reset_index(), digits=0)
+                    + "\n\n")
+    pipeline_md = ""
+    if pipeline_checks:
+        pipeline_md = ("- Kiểm tra pipeline (Bước 0, ResNet-50): "
+                       + "; ".join(f"{k} = {v}" for k, v in pipeline_checks.items())
+                       + f" (kỳ vọng loss ban đầu ≈ ln 9 = {np.log(9):.3f}).\n")
     txt = REPORT_TEMPLATE.format(
         backbone=backbone, recipe_id=recipe_id, epochs=epochs,
         epoch_note=(f"{epochs} epoch cho mọi thí nghiệm (GUIDE gợi ý 10–15), " if epochs < 10 else
                     f"{epochs} epoch (bài báo ~100 epoch nên số tuyệt đối có thể thấp hơn bài báo), "), method=method, n_seed=get("F01", "seed"),
         f_mf1=get("F01", "test_macro_f1"), f_top1=get("F01", "test_top1"), f_ece=get("F01", "test_ece"),
-        b_mf1=get("T00", "test_macro_f1"), b_top1=get("T00", "test_top1"), split_md=split_md,
+        b_mf1=get("T00", "test_macro_f1"), b_top1=get("T00", "test_top1"), split_md=split_md, pipeline_md=pipeline_md,
         env=", ".join(f"{k} {v}" for k, v in env.items()), gpu=env.get("gpu"), noise=NOISE_F1,
         bb_table=md_table(bb_df, ["exp_id", "backbone", "weights_tag", "params_M", "gmacs", "best_epoch",
                                   "val_macro_f1", "val_top1", "train_time_per_epoch_s", "latency_b1_p50_ms",
                                   "latency_b1_p95_ms"]),
         why_bb=why_bb,
+        bb_analysis=md_table(bb_df, ["exp_id", "backbone", "best_epoch", "epochs_to_99pct", "val_loss_min_epoch",
+                                     "val_loss_rise", "overfit", "train_val_gap_last"]),
+        bb_corr=", ".join(f"{k} = {v:.2f}" for k, v in (bb_corr or {}).items()) or "(chưa tính)",
         tr_table=md_table(tr_df, ["exp_id", "axis", "change_vs_T00", "val_macro_f1", "val_top1", "delta_vs_T00",
                                   "f1_chinee", "f1_snake", "reused_from"]),
         why_combo=why_combo, why_recipe=why_recipe,

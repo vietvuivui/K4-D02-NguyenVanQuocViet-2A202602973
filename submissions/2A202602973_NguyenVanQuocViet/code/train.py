@@ -312,7 +312,8 @@ def run(cfg: Config) -> dict:
 
     # 2. dữ liệu
     train_df, val_df, test_df = ds_lib.load_split(cfg.labels_dir, cfg.fold)
-    ds_lib.check_split(train_df, val_df, test_df, cfg.images_dir, verbose=False)
+    ds_lib.check_split(train_df, val_df, test_df, cfg.images_dir, verbose=False,
+                       labels_df=ds_lib.load_labels(cfg.labels_dir))
 
     # 4a. model trước loader để lấy đúng mean/std của trọng số
     model = model_lib.build_model(cfg.backbone, pretrained=True, num_classes=ds_lib.NUM_CLASSES,

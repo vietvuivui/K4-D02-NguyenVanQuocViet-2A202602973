@@ -49,14 +49,29 @@ def load_split(labels_dir: str | Path, fold: int = 0):
     return tuple(out)
 
 
+def load_labels(labels_dir: str | Path) -> pd.DataFrame | None:
+    """Đọc labels.csv gốc của tác giả (Filename, Label, Species) nếu có, để đối chiếu nhãn (S1).
+    Trả về None (bỏ qua đối chiếu) nếu không có file hoặc file không có nhãn theo từng ảnh."""
+    p = Path(labels_dir) / "labels.csv"
+    if not p.exists():
+        return None
+    df = pd.read_csv(p)
+    if not {"Filename", "Label"} <= set(df.columns):
+        print(f"{p} không có cột Filename/Label theo từng ảnh -> bỏ qua đối chiếu nhãn")
+        return None
+    return df
+
+
 def check_split(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame,
-                images_dir: str | Path, verbose: bool = True) -> dict:
+                images_dir: str | Path, verbose: bool = True, labels_df: pd.DataFrame | None = None) -> dict:
     """Kiểm tra bắt buộc trước khi train (README.md, mục 2.1). In ra và trả về dict số liệu.
 
     1. số ảnh mỗi tập và mỗi lớp (cảnh báo nếu lệch 60/20/20 quá 1 điểm phần trăm)
     2. giao từng cặp tập theo Filename phải rỗng
     3. hợp ba tập = 17.509 ảnh
     4. mọi Filename tồn tại trong images_dir
+    5. (nếu có labels_df = labels.csv gốc) nhãn của từng ảnh trong ba file split khớp labels.csv:
+       phát hiện CSV bị sửa nhãn (S1)
     """
     splits = {"train": train_df, "val": val_df, "test": test_df}
     total = sum(len(d) for d in splits.values())
@@ -82,11 +97,23 @@ def check_split(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFr
     warnings = [f"{k}: {frac[k]:.2%} lệch kỳ vọng {EXPECTED_FRAC[k]:.0%} quá 1 điểm %"
                 for k in splits if abs(frac[k] - EXPECTED_FRAC[k]) > 0.01]
 
+    label_mismatch = None
+    if labels_df is not None:
+        ref = labels_df.drop_duplicates("Filename")[["Filename", "Label"]].rename(columns={"Label": "ref"})
+        m = pd.concat(splits.values())[["Filename", "Label"]].merge(ref, on="Filename", how="left")
+        label_mismatch = int((m["ref"].isna() | (m["ref"] != m["Label"])).sum())  # không có trong labels.csv hoặc khác nhãn
+    counts = per_class["total"]
+    imbalance = float(counts.max() / counts.min())
+
     if verbose:
         print("Số ảnh mỗi tập:", n, "| tỉ lệ:", {k: f"{v:.2%}" for k, v in frac.items()})
         print("Số ảnh mỗi lớp:\n", per_class.to_string())
         print("Giao từng cặp:", overlap, "| hợp ba tập:", union, "| trùng trong tập:", dup_within)
         print(f"File thiếu trong {images_dir}: {len(missing)}", missing[:5])
+        print(f"Tỉ lệ lớp nhiều nhất / ít nhất = {counts.idxmax()} {counts.max()} / {counts.idxmin()} {counts.min()} "
+              f"= {imbalance:.2f}")
+        if label_mismatch is not None:
+            print("Nhãn lệch so với labels.csv gốc:", label_mismatch)
         for w in warnings:
             print("CẢNH BÁO:", w, "-> báo giảng viên trước khi chạy tiếp")
 
@@ -95,9 +122,11 @@ def check_split(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFr
     assert union == TOTAL_IMAGES, f"Hợp ba tập = {union}, kỳ vọng {TOTAL_IMAGES}"
     assert images_dir.is_dir(), f"Không thấy thư mục ảnh {images_dir}"
     assert not missing, f"{len(missing)} file trong CSV không có trong {images_dir}, ví dụ {missing[:5]}"
+    assert not label_mismatch, f"{label_mismatch} ảnh có nhãn khác labels.csv gốc -> CSV đã bị sửa (S1)"
 
     return {"n": n, "frac": frac, "per_class": per_class.to_dict(), "overlap": overlap,
-            "union": union, "missing": len(missing), "warnings": warnings}
+            "union": union, "missing": len(missing), "warnings": warnings,
+            "imbalance_ratio": imbalance, "label_mismatch": label_mismatch}
 
 
 def build_transforms(train: bool, img_size: int = 224, aug: str = "basic",
