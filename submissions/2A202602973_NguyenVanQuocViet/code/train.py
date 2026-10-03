@@ -52,6 +52,7 @@ class Config:
     mix: str | None = None            # None | mixup | cutmix
     mix_alpha: float = 1.0
     cache_images: bool = False        # nạp ảnh vào RAM (dataset.DeepWeedsDataset)
+    cache_dir: str | None = None      # cache memmap trên đĩa (khuyên dùng trên Colab, vd /content/cache)
     # --- loss ---
     loss: str = "ce"                  # ce | ls | focal | ce_weighted
     label_smoothing: float = 0.0
@@ -69,6 +70,7 @@ class Config:
     grad_clip: float | None = None
     ema_decay: float | None = None
     amp: bool = True
+    channels_last: bool = True        # bố cục bộ nhớ NHWC: conv nhanh hơn với AMP trên GPU Tensor Core
     num_workers: int = 2
     deterministic: bool = False       # True: cudnn.deterministic (chậm hơn, tái lập tốt hơn)
     # --- đường dẫn ---
@@ -178,8 +180,9 @@ def train_one_epoch(model, loader, criterion, optimizer, scheduler, scaler, cfg:
     model_lib.set_train_mode(model)
     total_loss, correct, seen = 0.0, 0, 0
     lrs = []
+    mem = torch.channels_last if cfg.channels_last else torch.contiguous_format
     for x, y, _ in loader:
-        x = x.to(device, non_blocking=True)
+        x = x.to(device, non_blocking=True).contiguous(memory_format=mem)
         y = y.to(device, non_blocking=True)
         with _autocast(cfg, device):
             if cfg.mix:
@@ -217,13 +220,14 @@ def train_one_epoch(model, loader, criterion, optimizer, scheduler, scaler, cfg:
 
 
 @torch.inference_mode()
-def evaluate(model, loader, criterion, device, amp: bool = True):
+def evaluate(model, loader, criterion, device, amp: bool = True, channels_last: bool = False):
     """Chạy model ở chế độ eval. Trả về (filenames, y_true[N], logits[N, 9], loss) theo đúng thứ tự loader."""
     model.eval()
     names, ys, outs = [], [], []
     total_loss, seen = 0.0, 0
+    mem = torch.channels_last if channels_last else torch.contiguous_format
     for x, y, f in loader:
-        x = x.to(device, non_blocking=True)
+        x = x.to(device, non_blocking=True).contiguous(memory_format=mem)
         y = y.to(device, non_blocking=True)
         with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp and device.type == "cuda"):
             logits = model(x)
@@ -313,6 +317,8 @@ def run(cfg: Config) -> dict:
     # 4a. model trước loader để lấy đúng mean/std của trọng số
     model = model_lib.build_model(cfg.backbone, pretrained=True, num_classes=ds_lib.NUM_CLASSES,
                                   drop_rate=cfg.drop_rate, init=cfg.init).to(device)
+    if cfg.channels_last:
+        model = model.to(memory_format=torch.channels_last)
     pcfg = getattr(model, "pretrained_cfg", {}) or {}
     mean, std = pcfg.get("mean", ds_lib.IMAGENET_MEAN), pcfg.get("std", ds_lib.IMAGENET_STD)
     n_params = model_lib.count_params(model)
@@ -326,7 +332,7 @@ def run(cfg: Config) -> dict:
     tf_train = ds_lib.build_transforms(True, cfg.img_size, cfg.aug, mean, std)
     tf_eval = ds_lib.build_transforms(False, cfg.img_size, mean=mean, std=std)
     kw = dict(images_dir=cfg.images_dir, batch_size=cfg.batch_size, num_workers=cfg.num_workers,
-              seed=cfg.seed, cache=cfg.cache_images)
+              seed=cfg.seed, cache=cfg.cache_dir or cfg.cache_images)
     train_loader = ds_lib.make_loader(train_df, transform=tf_train, train=True, sampler=cfg.sampler, **kw)
     val_loader = ds_lib.make_loader(val_df, transform=tf_eval, train=False, **kw)
 
@@ -359,7 +365,7 @@ def run(cfg: Config) -> dict:
         all_lrs += tr.pop("lrs")
 
         eval_model = ema.module if ema is not None else model
-        _, y_val, logits_val, val_loss = evaluate(eval_model, val_loader, eval_criterion, device, cfg.amp)
+        _, y_val, logits_val, val_loss = evaluate(eval_model, val_loader, eval_criterion, device, cfg.amp, cfg.channels_last)
         m = metrics_from_logits(y_val, logits_val)
         row = {"epoch": epoch, **tr, "val_loss": val_loss, "val_top1": m["top1"],
                "val_macro_f1": m["macro_f1"], "val_balanced_acc": m["balanced_acc"], "val_ece": m["ece"],
@@ -379,7 +385,7 @@ def run(cfg: Config) -> dict:
 
     # 6. nạp checkpoint tốt nhất, lưu dự đoán val
     model.load_state_dict(best_state)
-    names_val, y_val, logits_val, _ = evaluate(model, val_loader, eval_criterion, device, cfg.amp)
+    names_val, y_val, logits_val, _ = evaluate(model, val_loader, eval_criterion, device, cfg.amp, cfg.channels_last)
     np.savez(out / "val_logits.npz", filenames=np.array(names_val), y_true=y_val, logits=logits_val)
     save_predictions(pred_path(cfg, "val"), names_val, y_val, softmax_np(logits_val))
     m_val = metrics_from_logits(y_val, logits_val)
@@ -390,18 +396,20 @@ def run(cfg: Config) -> dict:
         "val_macro_f1": m_val["macro_f1"], "val_top1": m_val["top1"],
         "val_balanced_acc": m_val["balanced_acc"], "val_ece": m_val["ece"],
         "train_time_per_epoch_s": float(np.mean(epoch_times)), "run_dir": str(out),
+        "checkpoint": str(out / "best.pt") if cfg.save_checkpoint else None,
     }
 
     # 7. test: chỉ ở Bước 4, đúng MỘT lần với checkpoint đã chọn trên val
     if cfg.save_test_predictions:
         test_loader = ds_lib.make_loader(test_df, transform=tf_eval, train=False, **kw)
-        names_t, y_t, logits_t, _ = evaluate(model, test_loader, eval_criterion, device, cfg.amp)
+        names_t, y_t, logits_t, _ = evaluate(model, test_loader, eval_criterion, device, cfg.amp, cfg.channels_last)
         np.savez(out / "test_logits.npz", filenames=np.array(names_t), y_true=y_t, logits=logits_t)
         save_predictions(pred_path(cfg, "test"), names_t, y_t, softmax_np(logits_t))
         m_t = metrics_from_logits(y_t, logits_t)
         summary.update({"test_macro_f1": m_t["macro_f1"], "test_top1": m_t["top1"], "test_ece": m_t["ece"]})
 
     # 8. biểu đồ + tóm tắt
+    np.save(out / "lr_steps.npy", np.asarray(all_lrs, dtype=np.float32))
     title = f"{cfg.exp_id} · {cfg.backbone} · seed {cfg.seed} · best epoch {best_epoch} (val macro-F1 {best_f1:.4f})"
     plot_curves(history, curve_path(cfg), title, all_lrs)
     (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

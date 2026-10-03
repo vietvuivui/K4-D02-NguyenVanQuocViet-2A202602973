@@ -133,21 +133,58 @@ def build_transforms(train: bool, img_size: int = 224, aug: str = "basic",
     return T.Compose([*ops, *normalize])
 
 
+def build_memmap_cache(filenames: list[str], images_dir: str | Path, cache_dir: str | Path) -> Path:
+    """Giải mã mọi ảnh MỘT lần thành mảng uint8 (N, H, W, 3) lưu ở `cache_dir/<băm danh sách file>.npy`.
+
+    Các lần chạy sau (và các worker của DataLoader) đọc bằng np.load(mmap_mode="r"): không giải mã JPEG
+    lặp lại, không nhân bản RAM giữa các worker. Chỉ cache dữ liệu đầu vào, không đổi nội dung ảnh.
+    Nên đặt cache_dir trên đĩa cục bộ của Colab (vd /content/cache), không đặt trên Drive.
+    """
+    import hashlib
+
+    key = hashlib.md5("\n".join(filenames).encode()).hexdigest()[:16]
+    path = Path(cache_dir) / f"{key}.npy"
+    if path.exists():
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(Path(images_dir) / filenames[0]) as im0:
+        w, h = im0.size
+    tmp = path.with_suffix(".tmp.npy")
+    arr = np.lib.format.open_memmap(tmp, mode="w+", dtype=np.uint8, shape=(len(filenames), h, w, 3))
+    for i, f in enumerate(filenames):
+        with Image.open(Path(images_dir) / f) as im:
+            im = im.convert("RGB")
+            assert im.size == (w, h), f"{f}: kích thước {im.size} khác {(w, h)}, không cache được"
+            arr[i] = np.asarray(im)
+    arr.flush()
+    del arr
+    tmp.replace(path)
+    return path
+
+
 class DeepWeedsDataset(Dataset):
     """Dataset đọc ảnh từ `images_dir` theo DataFrame (Filename, Label).
 
     __getitem__(i) trả về (ảnh đã transform, nhãn int, tên file str).
-    cache=True: nạp trước ảnh (đã giải mã, uint8) vào RAM, ~3,4 GB cho cả 17.509 ảnh 256x256;
-    chỉ bật khi đọc đĩa là nút thắt.
+    cache:
+      - False      : đọc và giải mã JPEG mỗi lần
+      - True       : nạp ảnh đã giải mã vào RAM (list PIL)
+      - "<thư mục>": cache memmap trên đĩa (build_memmap_cache), khuyên dùng trên Colab
     """
 
-    def __init__(self, df: pd.DataFrame, images_dir: str | Path, transform=None, cache: bool = False):
+    def __init__(self, df: pd.DataFrame, images_dir: str | Path, transform=None, cache: bool | str = False):
         self.df = df.reset_index(drop=True)
         self.images_dir = Path(images_dir)
         self.transform = transform
         self.filenames = self.df["Filename"].tolist()
         self.labels = self.df["Label"].astype(int).to_numpy()
-        self._cache = [self._load(f) for f in self.filenames] if cache else None
+        self._cache = None
+        self._mmap_path = None
+        self._mmap = None
+        if isinstance(cache, (str, Path)) and cache:
+            self._mmap_path = build_memmap_cache(self.filenames, self.images_dir, cache)
+        elif cache:
+            self._cache = [self._load(f) for f in self.filenames]
 
     def _load(self, filename: str) -> Image.Image:
         with Image.open(self.images_dir / filename) as im:
@@ -157,7 +194,14 @@ class DeepWeedsDataset(Dataset):
         return len(self.filenames)
 
     def __getitem__(self, i: int):
-        img = self._cache[i] if self._cache is not None else self._load(self.filenames[i])
+        if self._mmap_path is not None:
+            if self._mmap is None:  # mở lười trong từng worker
+                self._mmap = np.load(self._mmap_path, mmap_mode="r")
+            img = Image.fromarray(np.array(self._mmap[i]))
+        elif self._cache is not None:
+            img = self._cache[i]
+        else:
+            img = self._load(self.filenames[i])
         if self.transform is not None:
             img = self.transform(img)
         return img, int(self.labels[i]), self.filenames[i]
@@ -171,7 +215,7 @@ def _seed_worker(worker_id: int) -> None:
 
 def make_loader(df: pd.DataFrame, images_dir: str | Path, transform, batch_size: int,
                 train: bool, sampler: str | None = None, num_workers: int = 2,
-                seed: int = 0, cache: bool = False) -> DataLoader:
+                seed: int = 0, cache: bool | str = False) -> DataLoader:
     """Tạo DataLoader.
 
     - train=True: shuffle, hoặc sampler="balanced" (WeightedRandomSampler, trọng số 1/n_lớp,
