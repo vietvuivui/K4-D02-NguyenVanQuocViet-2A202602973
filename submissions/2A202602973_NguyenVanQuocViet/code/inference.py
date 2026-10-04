@@ -215,9 +215,18 @@ def fuse_conv_bn(model, check_input=None, inplace: bool = False):
                 parent._modules[b] = _bn_replacement(bn)
                 n_fused += 1
     fused_model.eval()
-    print(f"fuse_conv_bn: đã gộp {n_fused} cặp Conv2d+BatchNorm2d")
+    fused_model.n_fused = n_fused
+    print(f"fuse_conv_bn: đã gộp {n_fused} cặp Conv2d+BatchNorm2d"
+          + ("" if n_fused else " (kiến trúc không có BatchNorm, vd dùng LayerNorm: không áp dụng)"))
     if check_input is not None:
-        diff = (model(check_input).float() - fused_model(check_input).float()).abs().max().item()
-        print(f"fuse_conv_bn: sai số lớn nhất trước/sau gộp = {diff:.2e}")
+        # tắt TF32 khi so: TF32 (GPU Ampere+) tự làm lệch ~1e-3, che mất sai số thật của phép gộp
+        tf32 = (torch.backends.cudnn.allow_tf32, torch.backends.cuda.matmul.allow_tf32)
+        torch.backends.cudnn.allow_tf32 = torch.backends.cuda.matmul.allow_tf32 = False
+        try:
+            diff = (model(check_input).float() - fused_model(check_input).float()).abs().max().item()
+        finally:
+            torch.backends.cudnn.allow_tf32, torch.backends.cuda.matmul.allow_tf32 = tf32
+        print(f"fuse_conv_bn: sai số lớn nhất trước/sau gộp = {diff:.2e}"
+              + ("" if diff <= 1e-5 else "  <-- CẢNH BÁO: lớn hơn 1e-5, kiểm tra lại phép gộp"))
         fused_model.fuse_max_abs_diff = diff
     return fused_model

@@ -28,9 +28,11 @@ from train import Config, curve_path, plot_curves, pred_path, run, run_dir, soft
 from eval import compute_metrics, mean_std, save_predictions  # noqa: E402
 
 # ----------------------------------------------------------------------------- quy tắc chọn trên VAL
-NOISE_F1 = 0.005          # chênh lệch macro-F1 val nhỏ hơn mức này (1 seed) coi là "không phân biệt được"
+NOISE_F1 = 0.005          # Bước 1 (chưa đo nhiễu): chênh lệch macro-F1 val nhỏ hơn mức này coi là "không phân biệt được"
 INFER_MIN_GAIN = 0.002    # phương pháp suy luận phải hơn I00 ít nhất mức này mới được chọn cho chung kết
 LATENCY_BUDGET_MS = 100.0  # ngân sách thời gian thực, p95 batch 1 (slide trang 61)
+NOISE_FLOOR = 0.003       # sàn ngưỡng nhiễu ở Bước 2 (slide trang 59: dưới ~0,3 điểm là nhiễu)
+NOISE_SEEDS = (0, 1, 2)   # seed của T00 dùng để đo nhiễu (cũng là mốc T00 ở Bước 4)
 RARE = {"Chinee Apple": 0, "Snake Weed": 7}
 
 # Ghim tag trọng số (timm "kiến_trúc.tag"): tag mặc định đổi theo phiên bản timm, và mặc định của convnext_tiny
@@ -53,8 +55,9 @@ ABLATIONS = [
     ("T06", "C", "loss=focal gamma=2", dict(loss="focal", focal_gamma=2.0)),
     ("T07", "C", "loss=CE trọng số 1/n_c (train)", dict(loss="ce_weighted", class_weight_beta=0.0)),
     ("T08", "F", "EMA decay=0.995", dict(ema_decay=0.995)),  # ~2000 bước ở 12 epoch: 0.995^2000 ≈ 0,004% trọng số khởi tạo còn lại
+    ("T09", "D", "sampler cân bằng lớp (oversample)", dict(sampler="balanced")),
 ]
-COMBO_ID = "T09"
+COMBO_ID = "T10"
 
 # các trường không ảnh hưởng kết quả huấn luyện: bỏ qua khi so "cùng cấu hình"
 _NON_RECIPE = {"exp_id", "desc", "save_test_predictions", "num_workers", "save_checkpoint", "images_dir",
@@ -98,7 +101,7 @@ def find_equivalent(cfg: Config) -> Path | None:
 def _alias_run(src: Path, cfg: Config) -> dict:
     """Dùng lại lần chạy `src` dưới exp_id mới: chép log/logit (không chép checkpoint), vẽ lại đường cong."""
     dst = run_dir(cfg)
-    shutil.copytree(src, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns("best.pt"))
+    shutil.copytree(src, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns("best*.pt"))
     old = _read_json(src / "summary.json")
     s = {**old, "exp_id": cfg.exp_id, "run_dir": str(dst), "reused_from": f"{old['exp_id']} seed{old['seed']}"}
     _write_json(dst / "config.json", dataclasses.asdict(cfg))
@@ -118,6 +121,12 @@ def run_or_load(cfg: Config, reuse: bool = True) -> dict:
     """Đã chạy xong -> đọc summary; có lần chạy cùng cấu hình -> dùng lại; còn lại -> train.run(cfg)."""
     summ = run_dir(cfg) / "summary.json"
     if summ.exists():
+        saved = _recipe(_read_json(run_dir(cfg) / "config.json"))
+        want = _recipe(dataclasses.asdict(cfg))
+        if saved != want:  # cùng exp_id/seed nhưng cấu hình khác -> không được nạp nhầm kết quả cũ
+            diff = {k: (saved.get(k), want.get(k)) for k in set(saved) | set(want) if saved.get(k) != want.get(k)}
+            raise ValueError(f"{run_dir(cfg)} đã có kết quả với cấu hình KHÁC (đã lưu, yêu cầu): {diff}. "
+                             "Xoá thư mục đó hoặc đổi exp_id.")
         return _read_json(summ)
     src = find_equivalent(cfg) if reuse else None
     return _alias_run(src, cfg) if src is not None else run(cfg)
@@ -255,33 +264,81 @@ def _training_row(s: dict, exp_id: str, axis: str, change: str, base_f1: float |
             **_rare_f1(y, lg), "best_epoch": s["best_epoch"], "reused_from": s.get("reused_from", "")}
 
 
-def step2_training(paths: dict, backbone: str, ablations=ABLATIONS, **overrides) -> pd.DataFrame:
-    """T00 (nền) + mỗi ablation khác T00 đúng một yếu tố, cùng backbone, seed 0."""
-    s0 = run_or_load(Config(exp_id="T00", backbone=backbone, desc=f"{backbone}_baseline", seed=0,
-                            **overrides, **paths))
+def _t00(paths: dict, backbone: str, seed: int, **overrides) -> dict:
+    return run_or_load(Config(exp_id="T00", backbone=backbone, desc=f"{_slug(backbone)}_baseline", seed=seed,
+                              **overrides, **paths))
+
+
+def measure_noise(paths: dict, backbone: str, seeds=None, **overrides) -> dict:
+    """Đo nhiễu thật: T00 với nhiều seed (seed 0 dùng lại B0x; các seed khác cũng chính là mốc T00 của
+    Bước 4, nên tổng số lần train không đổi). Ngưỡng = max(std mẫu ddof=1, NOISE_FLOOR)."""
+    seeds = tuple(seeds or NOISE_SEEDS)
+    runs = [_t00(paths, backbone, sd, **overrides) for sd in seeds]
+    f1 = np.array([r["val_macro_f1"] for r in runs])
+    std = float(f1.std(ddof=1)) if len(f1) > 1 else float("nan")
+    thr = max(std, NOISE_FLOOR) if np.isfinite(std) else NOISE_F1
+    return {"seeds": list(seeds), "val_macro_f1": f1.tolist(), "mean": float(f1.mean()), "std": std,
+            "threshold": thr, "runs": runs}
+
+
+def _vs_noise(delta: float, thr: float) -> str:
+    if delta > thr:
+        return "vượt nhiễu (tốt hơn)"
+    if delta < -thr:
+        return "kém hơn rõ"
+    return "không phân biệt được"
+
+
+def annotate_noise(tr_df: pd.DataFrame, noise: dict | None) -> pd.DataFrame:
+    """Thêm cột noise_threshold và vs_noise (kết luận của từng dòng so với nhiễu)."""
+    thr = noise["threshold"] if noise else NOISE_F1
+    df = tr_df.copy()
+    df["noise_threshold"] = thr
+    df["vs_noise"] = [("mốc" if (r.exp_id == "T00" and r.seed == 0) else
+                       "đo nhiễu" if r.exp_id == "T00" else _vs_noise(r.delta_vs_T00, thr))
+                      for r in df.itertuples()]
+    df["note"] = [(f"dùng lại lần chạy {r.reused_from} (cùng cấu hình, cùng seed)" if r.reused_from else "")
+                  + ("; 1 seed" if r.exp_id != "T00" else "") for r in df.itertuples()]
+    return df
+
+
+def step2_training(paths: dict, backbone: str, ablations=ABLATIONS, noise: dict | None = None,
+                   **overrides) -> pd.DataFrame:
+    """T00 (nền, seed 0) + mỗi ablation khác T00 đúng một yếu tố, cùng backbone, seed 0.
+    Nếu có `noise` (measure_noise), thêm dòng T00 các seed khác và cột so Δ với ngưỡng nhiễu."""
+    s0 = _t00(paths, backbone, 0, **overrides)
     rows = [_training_row(s0, "T00", "-", "công thức nền", None)]
+    for r in (noise or {}).get("runs", []):
+        if r["seed"] != 0:
+            rows.append(_training_row(r, "T00", "-", f"công thức nền, seed {r['seed']} (đo nhiễu)", s0["val_macro_f1"]))
     for exp_id, axis, change, ov in ablations:
         s = run_or_load(Config(exp_id=exp_id, backbone=backbone, desc=_slug(change), seed=0,
                                **{**overrides, **ov}, **paths))
         rows.append(_training_row(s, exp_id, axis, change, s0["val_macro_f1"]))
-    return pd.DataFrame(rows)
+    return annotate_noise(pd.DataFrame(rows), noise)
 
 
 def select_combination(tr_df: pd.DataFrame, ablations=ABLATIONS) -> tuple[dict, str]:
-    """Quy tắc kết hợp (tham lam theo trục): mỗi trục lấy biến thể có Δ lớn nhất; giữ các trục có Δ > 0.
-    Nếu ít hơn 2 trục có Δ > 0, vẫn ghép 2 biến thể Δ lớn nhất ở 2 trục khác nhau để kiểm tra
-    tính cộng dồn (GUIDE mục 3.1, ý 4). Trả về (ghi đè Config, lý do)."""
+    """Quy tắc kết hợp. Mọi T0x so với CÙNG T00 (không đổi nền giữa chừng), nên thứ tự các trục không ảnh hưởng.
+    Mỗi trục lấy biến thể có Δ lớn nhất; ghép các trục mà biến thể đó THẮNG RÕ (Δ > ngưỡng nhiễu đo được).
+    Nếu ít hơn 2 trục thắng rõ, nới thành Δ > 0; nếu vẫn ít hơn 2, ghép 2 trục có Δ lớn nhất, để vẫn có
+    một thí nghiệm kiểm tra tính cộng dồn (GUIDE mục 3.1, ý 4). Trả về (ghi đè Config, lý do)."""
     ov_of = {e: ov for e, _, _, ov in ablations}
-    abl = tr_df[tr_df.exp_id != "T00"].sort_values("delta_vs_T00", ascending=False)
+    thr = float(tr_df["noise_threshold"].iloc[0]) if "noise_threshold" in tr_df else NOISE_F1
+    abl = tr_df[tr_df.exp_id.isin(ov_of)].sort_values("delta_vs_T00", ascending=False)
     per_axis = abl.groupby("axis", sort=False).head(1)
-    chosen = per_axis[per_axis.delta_vs_T00 > 0]
+    rule = f"Δ > ngưỡng nhiễu {thr:.4f}"
+    chosen = per_axis[per_axis.delta_vs_T00 > thr]
     if len(chosen) < 2:
-        chosen = per_axis.head(2)
+        chosen, rule = per_axis[per_axis.delta_vs_T00 > 0], f"ít hơn 2 trục vượt nhiễu {thr:.4f} -> nới thành Δ > 0"
+    if len(chosen) < 2:
+        chosen, rule = per_axis.head(2), "ít hơn 2 trục có Δ > 0 -> ghép 2 trục có Δ lớn nhất để kiểm tra cộng dồn"
     combo = {}
     for e in chosen.exp_id:
         combo.update(ov_of[e])
-    reason = ("Ghép " + " + ".join(f"{r.exp_id} ({r.change_vs_T00}, Δ={r.delta_vs_T00:+.4f})"
-                                   for r in chosen.itertuples()) + f" thành {COMBO_ID}.")
+    reason = (f"Mọi T0x so với cùng T00 (không đổi nền giữa chừng). Quy tắc chọn: {rule}. Ghép "
+              + " + ".join(f"{r.exp_id} ({r.change_vs_T00}, Δ={r.delta_vs_T00:+.4f})" for r in chosen.itertuples())
+              + f" thành {COMBO_ID}.")
     return combo, reason
 
 
@@ -291,13 +348,16 @@ def step2_combo(paths: dict, backbone: str, combo: dict, **overrides) -> dict:
 
 
 def select_recipe(tr_df: pd.DataFrame, ablations=ABLATIONS, combo: dict | None = None) -> tuple[str, dict, str]:
-    """Công thức chung kết = dòng có macro-F1 val cao nhất trong T00..T09. Trả về (exp_id, ghi đè, lý do)."""
+    """Công thức chung kết = dòng seed 0 có macro-F1 val cao nhất trong T00..T10. Trả về (exp_id, ghi đè, lý do)."""
     ov_of = {"T00": {}, **{e: ov for e, _, _, ov in ablations}, COMBO_ID: combo or {}}
-    best = tr_df.loc[tr_df["val_macro_f1"].idxmax()]
-    base = tr_df.loc[tr_df.exp_id == "T00", "val_macro_f1"].item()
-    reason = (f"{best.exp_id} có macro-F1 val cao nhất {best.val_macro_f1:.4f} (T00 {base:.4f}, "
-              f"Δ={best.val_macro_f1 - base:+.4f}; 1 seed -> {'vượt' if best.val_macro_f1 - base > NOISE_F1 else 'chưa vượt'} "
-              f"ngưỡng nhiễu {NOISE_F1}).")
+    thr = float(tr_df["noise_threshold"].iloc[0]) if "noise_threshold" in tr_df else NOISE_F1
+    cand = tr_df[tr_df.seed == 0]
+    best = cand.loc[cand["val_macro_f1"].idxmax()]
+    base = cand.loc[cand.exp_id == "T00", "val_macro_f1"].item()
+    d = best.val_macro_f1 - base
+    verdict = "là chính mốc" if best.exp_id == "T00" else _vs_noise(d, thr)
+    reason = (f"{best.exp_id} có macro-F1 val cao nhất {best.val_macro_f1:.4f} (T00 seed 0 {base:.4f}, Δ={d:+.4f}); "
+              f"so với ngưỡng nhiễu {thr:.4f}: {verdict}. Lựa chọn dựa trên 1 seed; Bước 4 kiểm chứng bằng 3 seed.")
     return best.exp_id, ov_of[best.exp_id], reason
 
 
@@ -359,12 +419,37 @@ def _lat_row(cfg_name, lat, fused: bool) -> dict:
             "images_per_s": lat["images_per_s"], "torch": lat["torch"], "preprocessing_included": False}
 
 
-def step3_inference(recipe_summary: dict, candidates: list[dict], device, cache_csv: str | Path,
-                    ema_pair: tuple[dict, dict] | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """So sánh phương pháp suy luận trên VAL cho model của công thức đã chọn (seed 0).
+# Phân loại chi phí suy luận (để trả lời: TTA/ensemble hợp ngoại tuyến, robot nên dùng thứ không tốn thêm)
+def _cost_class(code: str) -> str:
+    if code == "I00":
+        return "mốc (1 lượt)"
+    if code.startswith(("I06", "I07", "I08")):
+        return "không tốn thêm"
+    if code.startswith("I04"):
+        return "1 lượt, FLOPs tăng"
+    return "tốn thêm (K lượt / nhiều mô hình)"
 
-    candidates: các lần chạy (summary) để ensemble (I05). ema_pair: (T00, T08) cho dòng I06.
-    Trả về (bảng Inference, bảng Latency); lưu cache CSV để chạy lại không tốn GPU.
+
+def _soup_state(summaries: list[dict]) -> dict:
+    """Uniform soup: trung bình trọng số (và buffer BN) của các mô hình cùng kiến trúc, cùng trọng số tiền huấn luyện."""
+    states = [torch.load(s.get("checkpoint") or str(Path(s["run_dir"]) / "best.pt"), map_location="cpu")
+              for s in summaries]
+    out = {}
+    for k, v in states[0].items():
+        out[k] = (torch.stack([st[k].float() for st in states]).mean(0).to(v.dtype)
+                  if v.dtype.is_floating_point else v.clone())
+    return out
+
+
+def step3_inference(recipe_summary: dict, candidates: list[dict], device, cache_csv: str | Path,
+                    ema_summary: dict | None = None, seed_runs: list[dict] | None = None,
+                    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """So sánh phương pháp suy luận trên VAL (không train lại), cho model của công thức đã chọn (seed 0).
+
+    candidates : các lần chạy tốt nhất Bước 1-2 để ensemble khác backbone/công thức (I05).
+    ema_summary: lần chạy có EMA (T08): so trọng số EMA với trọng số thường CÙNG lần chạy, cùng epoch (I06).
+    seed_runs  : T00 seed 0/1/2: ensemble khác seed (I05_seeds) vs model soup (I06_soup), cùng 3 mô hình.
+    Độ trễ: batch 1 (p50/p95/p99) và thông lượng batch 32 cho từng phương pháp. Lưu cache CSV.
     """
     cache_csv = Path(cache_csv)
     lat_csv = cache_csv.with_name(cache_csv.stem + "_latency.csv")
@@ -379,82 +464,107 @@ def step3_inference(recipe_summary: dict, candidates: list[dict], device, cache_
     dev = device.type
 
     def lat_of(img_size, k, dtype="fp32", m=None, batch=1):
-        return Bm.latency_report(m or model, batch, img_size, dtype, dev, warmup=10, iters=100, k_views=k)
+        return Bm.latency_report(m if m is not None else model, batch, img_size, dtype, dev,
+                                 warmup=10, iters=100, k_views=k)
 
-    base_lat = lat_of(224, 1)
+    def lat_pair(img_size, k, dtype="fp32", m=None):
+        """(độ trễ batch 1, thông lượng batch 32 tính theo ảnh/s)."""
+        return lat_of(img_size, k, dtype, m), lat_of(img_size, k, dtype, m, batch=32)["images_per_s"]
+
+    def add(code, method, model_desc, K, img_size, m, lat1, thr32, note="", **extra):
+        rows.append({"exp_id": code, "method": method, "model": model_desc, "K": K, "img_size": img_size,
+                     "val_macro_f1": m["macro_f1"] if m else np.nan, "val_top1": m["top1"] if m else np.nan,
+                     "val_ece": m["ece"] if m else np.nan, "p50_ms": lat1["p50"], "p95_ms": lat1["p95"],
+                     "p99_ms": lat1["p99"], "images_per_s_b1": lat1["images_per_s"], "images_per_s_b32": thr32,
+                     "note": note, **extra})
+
+    base_lat, base_thr = lat_pair(224, 1)
     for code, meth in METHODS.items():
         try:
             names, y, views = method_logits(model, cfg, val_df, meth, device)
-        except Exception as e:  # vd ViT không nhận độ phân giải khác 224
+        except Exception as e:  # vd ViT/DeiT không nhận độ phân giải khác 224
             rows.append({"exp_id": code, "method": meth["label"], "model": who, "K": meth["k"],
+                         "img_size": meth["img_size"],
                          "note": f"không áp dụng: {type(e).__name__}: {str(e)[:80]}"})
             continue
         probs, _ = combine(views, meth)
-        m = _metrics(y, probs)
-        lat = base_lat if code == "I00" else lat_of(meth["img_size"], meth["k"])
-        rows.append({"exp_id": code, "method": meth["label"], "model": who, "K": meth["k"],
-                     "img_size": meth["img_size"], "val_macro_f1": m["macro_f1"], "val_top1": m["top1"],
-                     "val_ece": m["ece"], "p50_ms": lat["p50"], "p95_ms": lat["p95"], "p99_ms": lat["p99"],
-                     "images_per_s": lat["images_per_s"]})
+        lat1, thr = (base_lat, base_thr) if code == "I00" else lat_pair(meth["img_size"], meth["k"])
+        add(code, meth["label"], who, meth["k"], meth["img_size"], _metrics(y, probs), lat1, thr)
         if code == "I00":
             y0, logits0 = y, views[0]
 
-    # I05: ensemble các lần chạy tốt nhất (logit val 1-view đã lưu, cùng thứ tự file)
-    if len(candidates) >= 2:
-        probs_list, lats, members = [], [], []
-        for s in candidates:
-            n_, y_, lg_ = _val_logits(s)
+    def ensemble_row(code, label, members, note):
+        probs_list, lats, thrs, names = [], [], [], []
+        for s in members:
+            _, y_, lg_ = _val_logits(s)
             probs_list.append(softmax_np(lg_))
             mm = load_trained(s, device)
-            lats.append(lat_of(224, 1, m=mm))
-            members.append(f"{s['exp_id']}({s['backbone']})")
+            l1, t32 = lat_pair(224, 1, m=mm)
+            lats.append(l1)
+            thrs.append(t32)
+            names.append(f"{s['exp_id']} seed{s['seed']} ({s['backbone']})")
             del mm
             _empty_cache()
-        p = I.ensemble_probs(probs_list)
-        m = _metrics(y_, p)
-        rows.append({"exp_id": "I05", "method": f"ensemble {len(candidates)} mô hình (trung bình xác suất)",
-                     "model": " + ".join(members), "K": len(candidates), "img_size": 224,
-                     "val_macro_f1": m["macro_f1"], "val_top1": m["top1"], "val_ece": m["ece"],
-                     "p50_ms": sum(l["p50"] for l in lats), "p95_ms": sum(l["p95"] for l in lats),
-                     "p99_ms": sum(l["p99"] for l in lats),
-                     "images_per_s": 1000.0 / sum(l["p50"] for l in lats),
-                     "note": "độ trễ = tổng độ trễ từng mô hình (chạy tuần tự)"})
+        m = _metrics(y_, I.ensemble_probs(probs_list))
+        tot = {q: sum(l[q] for l in lats) for q in ("p50", "p95", "p99")}
+        tot["images_per_s"] = 1000.0 / tot["p50"]
+        add(code, label, " + ".join(names), len(members), 224, m, tot, 1.0 / sum(1.0 / t for t in thrs), note)
 
-    # I06: trọng số EMA (T08) so với không EMA (T00): cùng chi phí suy luận
-    if ema_pair is not None:
-        for s, tag in ((ema_pair[1], "có EMA"), (ema_pair[0], "không EMA")):
-            rows.append({"exp_id": "I06" if tag == "có EMA" else "I06_ref", "method": f"trọng số {tag}",
-                         "model": f"{s['exp_id']} seed{s['seed']}", "K": 1, "img_size": 224,
-                         "val_macro_f1": s["val_macro_f1"], "val_top1": s["val_top1"], "val_ece": s["val_ece"],
-                         "p50_ms": base_lat["p50"], "p95_ms": base_lat["p95"], "p99_ms": base_lat["p99"],
-                         "images_per_s": base_lat["images_per_s"],
-                         "note": "chi phí suy luận như I00 (khác ở lúc train)"})
+    # I05: ensemble khác backbone/công thức (logit val 1-view đã lưu, cùng thứ tự file)
+    if len(candidates) >= 2:
+        ensemble_row("I05", f"ensemble {len(candidates)} mô hình tốt nhất (trung bình xác suất)", candidates,
+                     "độ trễ = tổng độ trễ từng mô hình (chạy tuần tự)")
+    # I05_seeds + I06_soup: cùng 3 mô hình T00 khác seed -> ensemble (chi phí xK) vs soup (chi phí x1)
+    if seed_runs and len(seed_runs) >= 2:
+        ensemble_row("I05_seeds", f"ensemble {len(seed_runs)} seed của T00", seed_runs,
+                     "cùng công thức, khác seed; độ trễ = tổng từng mô hình")
+        soup_cfg = load_config(seed_runs[0])
+        soup = M.build_model(soup_cfg.backbone, pretrained=False, num_classes=D.NUM_CLASSES, init="scratch")
+        soup.load_state_dict(_soup_state(seed_runs))
+        soup = soup.to(device).eval()
+        _, ys, vs = method_logits(soup, soup_cfg, val_df, METHODS["I00"], device)
+        add("I06_soup", f"model soup đều {len(seed_runs)} seed của T00 (trung bình trọng số)",
+            " + ".join(f"T00 seed{s['seed']}" for s in seed_runs), 1, 224, _metrics(ys, softmax_np(vs[0])),
+            *lat_pair(224, 1, m=soup),
+            note="chi phí như 1 mô hình; head mỗi seed khởi tạo khác nhau nên soup có thể kém (ghi nhận, không phải lỗi)")
+        del soup
+        _empty_cache()
 
-    # I07: temperature scaling trên logit I00
+    # I06: EMA vs trọng số thường, CÙNG lần chạy T08, cùng epoch tốt nhất
+    if ema_summary is not None and ema_summary.get("checkpoint_raw") and Path(ema_summary["checkpoint_raw"]).exists():
+        ecfg = load_config(ema_summary)
+        for code, ck, label in (("I06", ema_summary["checkpoint"], "trọng số EMA"),
+                                ("I06_raw", ema_summary["checkpoint_raw"], "trọng số thường (không EMA)")):
+            mm = M.build_model(ecfg.backbone, pretrained=False, num_classes=D.NUM_CLASSES, init="scratch")
+            mm.load_state_dict(torch.load(ck, map_location="cpu"))
+            mm = mm.to(device).eval()
+            _, ye, ve = method_logits(mm, ecfg, val_df, METHODS["I00"], device)
+            add(code, f"{label}, {ema_summary['exp_id']} epoch {ema_summary['best_epoch']}",
+                f"{ema_summary['exp_id']} seed{ema_summary['seed']}", 1, 224, _metrics(ye, softmax_np(ve[0])),
+                base_lat, base_thr, note="cùng lần chạy, cùng epoch; chỉ khác trọng số dùng lúc suy luận")
+            del mm
+            _empty_cache()
+
+    # I07: temperature scaling trên logit I00 (T khớp trên val)
     T = I.fit_temperature(logits0, y0)
-    p_ts = I.apply_temperature(logits0, T)
-    m_ts = _metrics(y0, p_ts)
+    m_ts = _metrics(y0, I.apply_temperature(logits0, T))
     ece_cf, _ = _ece_crossfit(logits0, y0)
-    ece_before = _metrics(y0, softmax_np(logits0))["ece"]
-    rows.append({"exp_id": "I07", "method": f"temperature scaling (T={T:.3f}, khớp trên val)", "model": who,
-                 "K": 1, "img_size": 224, "val_macro_f1": m_ts["macro_f1"], "val_top1": m_ts["top1"],
-                 "val_ece": m_ts["ece"], "val_ece_before": ece_before, "val_ece_crossfit": ece_cf,
-                 "temperature": T, "p50_ms": base_lat["p50"], "p95_ms": base_lat["p95"],
-                 "p99_ms": base_lat["p99"], "images_per_s": base_lat["images_per_s"],
-                 "note": "ECE sau TS đo trên chính val (in-sample); val_ece_crossfit: khớp T ở nửa val, đo nửa kia"})
+    add("I07", f"temperature scaling (T={T:.3f}, khớp trên val)", who, 1, 224, m_ts, base_lat, base_thr,
+        note="ECE sau TS đo trên chính val (in-sample); val_ece_crossfit: khớp T ở nửa val, đo nửa kia",
+        val_ece_before=_metrics(y0, softmax_np(logits0))["ece"], val_ece_crossfit=ece_cf, temperature=T)
 
     # I08: gộp BN + FP16/AMP: độ chính xác và độ trễ
-    x_chk = torch.randn(2, 3, 224, 224, device=device)
-    fused = I.fuse_conv_bn(model, check_input=x_chk)
+    fused = I.fuse_conv_bn(model, check_input=torch.randn(2, 3, 224, 224, device=device))
+    fuse_note = (f"gộp {fused.n_fused} cặp Conv+BN, sai số lớn nhất {fused.fuse_max_abs_diff:.1e}" if fused.n_fused
+                 else "kiến trúc không có BatchNorm (LayerNorm): gộp BN không áp dụng, giống hệt I00")
     variants = [("I08_fused_fp32", "gộp BN, FP32", fused, "fp32", True)]
     if dev == "cuda":
         variants += [("I08_amp", "AMP (autocast FP16)", model, "amp", False),
                      ("I08_fp16", "FP16 (model.half())", model, "fp16", False),
                      ("I08_fused_fp16", "gộp BN + FP16", fused, "fp16", True)]
     mean, std = _norm_of(model)
-    tf = D.build_transforms(False, 224, mean=mean, std=std)
-    loader = D.make_loader(val_df, cfg.images_dir, tf, batch_size=64, train=False,
-                           num_workers=cfg.num_workers, cache=cfg.cache_dir or False)
+    loader = D.make_loader(val_df, cfg.images_dir, D.build_transforms(False, 224, mean=mean, std=std), batch_size=64,
+                           train=False, num_workers=cfg.num_workers, cache=cfg.cache_dir or False)
     for code, label, mm, dtype, is_fused in variants:
         if dtype == "fp16":
             mh = copy.deepcopy(mm).half()
@@ -462,13 +572,8 @@ def step3_inference(recipe_summary: dict, candidates: list[dict], device, cache_
             del mh
         else:
             _, y8, lg8 = I.predict_logits(mm, loader, device, amp=(dtype == "amp"))
-        m8 = _metrics(y8, softmax_np(lg8.astype(np.float64)))
-        lat = lat_of(224, 1, dtype=dtype, m=mm)
-        rows.append({"exp_id": code, "method": label, "model": who, "K": 1, "img_size": 224,
-                     "val_macro_f1": m8["macro_f1"], "val_top1": m8["top1"], "val_ece": m8["ece"],
-                     "p50_ms": lat["p50"], "p95_ms": lat["p95"], "p99_ms": lat["p99"],
-                     "images_per_s": lat["images_per_s"],
-                     "note": f"sai số gộp BN {getattr(fused, 'fuse_max_abs_diff', float('nan')):.1e}" if is_fused else ""})
+        add(code, label, who, 1, 224, _metrics(y8, softmax_np(lg8.astype(np.float64))),
+            *lat_pair(224, 1, dtype=dtype, m=mm), note=fuse_note if is_fused else "")
 
     # Bảng Latency: batch 1 và batch 32, các dtype, có/không gộp BN
     for dtype in (["fp32", "amp", "fp16"] if dev == "cuda" else ["fp32"]):
@@ -480,6 +585,8 @@ def step3_inference(recipe_summary: dict, candidates: list[dict], device, cache_
 
     inf = pd.DataFrame(rows)
     inf["rel_cost_vs_I00"] = inf["p50_ms"] / base_lat["p50"]
+    inf["cost_class"] = inf["exp_id"].map(_cost_class)
+    inf["realtime_ok"] = inf["p95_ms"] <= LATENCY_BUDGET_MS
     lat_df = pd.DataFrame(lat_rows)
     cache_csv.parent.mkdir(parents=True, exist_ok=True)
     inf.to_csv(cache_csv, index=False)
@@ -487,6 +594,26 @@ def step3_inference(recipe_summary: dict, candidates: list[dict], device, cache_
     del model, fused
     _empty_cache()
     return inf, lat_df
+
+
+def inference_tradeoff_summary(inf_df: pd.DataFrame) -> str:
+    """Số liệu để trả lời: TTA/ensemble hợp ngoại tuyến, robot nên dùng thứ không tốn thêm chi phí suy luận?"""
+    d = inf_df[inf_df.val_macro_f1.notna()]
+    i00 = d[d.exp_id == "I00"].iloc[0]
+    free = d[d.cost_class == "không tốn thêm"]
+    paid = d[d.cost_class.str.startswith("tốn thêm")]
+    parts = [f"I00: macro-F1 {i00.val_macro_f1:.4f}, p95 {i00.p95_ms:.1f} ms."]
+    if len(free):
+        b = free.loc[free.val_macro_f1.idxmax()]
+        parts.append(f"Tốt nhất nhóm không tốn thêm: {b.exp_id} ({b.method}) {b.val_macro_f1:.4f} "
+                     f"(Δ {b.val_macro_f1 - i00.val_macro_f1:+.4f}), p95 {b.p95_ms:.1f} ms.")
+    if len(paid):
+        b = paid.loc[paid.val_macro_f1.idxmax()]
+        parts.append(f"Tốt nhất nhóm tốn thêm: {b.exp_id} ({b.method}) {b.val_macro_f1:.4f} "
+                     f"(Δ {b.val_macro_f1 - i00.val_macro_f1:+.4f}), p95 {b.p95_ms:.1f} ms = x{b.rel_cost_vs_I00:.1f} I00.")
+    ok = d[d.realtime_ok]
+    parts.append(f"{len(ok)}/{len(d)} phương pháp có p95 ≤ {LATENCY_BUDGET_MS:.0f} ms ở batch 1.")
+    return " ".join(parts)
 
 
 def select_inference(inf_df: pd.DataFrame, override: str | None = None) -> tuple[str, str]:
@@ -571,8 +698,7 @@ def step4_final(paths: dict, backbone: str, recipe: dict, method_code: str, pred
     for seed in seeds:
         fs = run_or_load(Config(exp_id="F01", backbone=backbone, desc="final", seed=seed,
                                 **{**overrides, **recipe}, **paths))
-        bs = run_or_load(Config(exp_id="T00", backbone=backbone, desc=f"{backbone}_baseline", seed=seed,
-                                **overrides, **paths))
+        bs = _t00(paths, backbone, seed, **overrides)
         out["F01"].append(fs)
         out["T00"].append(bs)
     for fs, bs in zip(out["F01"], out["T00"]):
@@ -621,7 +747,11 @@ def final_table(pred_dir: str | Path, groups=("F01", "T00", "F01rt", "F01uncal")
         for k in per[0]:
             if k in ("exp_id", "config", "seed"):
                 continue
-            mu, sd = mean_std([r[k] for r in per])
+            vals = [r[k] for r in per]
+            if all(pd.isna(v) for v in vals):  # vd F01rt/F01uncal không có file val
+                agg[k] = ""
+                continue
+            mu, sd = mean_std(vals)
             agg[k] = f"{mu:.4f} ± {sd:.4f}"
         rows.append(agg)
     return pd.DataFrame(rows)
@@ -717,8 +847,22 @@ def plot_errors(pred_file: str | Path, images_dir: str | Path, path: str | Path,
     plt.close(fig)
 
 
+def top_confusions(cm: np.ndarray, k: int = 5) -> pd.DataFrame:
+    """k cặp (nhãn thật -> dự đoán) bị nhầm nhiều nhất từ ma trận nhầm lẫn (số ảnh, tổng qua seed)."""
+    off = cm.astype(float).copy()
+    np.fill_diagonal(off, -1)
+    rows = []
+    for idx in np.argsort(off, axis=None)[::-1][:k]:
+        t, q = np.unravel_index(idx, cm.shape)
+        if off[t, q] <= 0:
+            break
+        rows.append({"true": D.CLASS_NAMES[t], "pred": D.CLASS_NAMES[q], "n_images": int(cm[t, q]),
+                     "pct_of_true_class": float(cm[t, q] / cm[t].sum()), "true_idx": int(t), "pred_idx": int(q)})
+    return pd.DataFrame(rows)
+
+
 def per_class_table(eval_out: str | Path, tags=("F01", "T00", "F01rt")) -> pd.DataFrame:
-    """Sheet PerClass từ file <tag>_per_class.csv do `eval.py score --out` ghi ra."""
+    """Sheet PerClass từ file <tag>_per_class.csv do `eval.py score --out` ghi ra (số ảnh test = support)."""
     frames = []
     for t in tags:
         f = Path(eval_out) / f"{t}_per_class.csv"
@@ -729,38 +873,74 @@ def per_class_table(eval_out: str | Path, tags=("F01", "T00", "F01rt")) -> pd.Da
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
+def hard_class_table(pc_df: pd.DataFrame) -> pd.DataFrame:
+    """Precision/recall/F1 (mean ± std qua seed) của Chinee Apple và Snake Weed, lấy từ output eval.py."""
+    d = pc_df[pc_df["class"].isin(RARE.keys())].copy()
+    for k in ("precision", "recall", "f1"):
+        d[k] = [f"{m:.4f} ± {sd:.4f}" for m, sd in zip(d[f"{k}_mean"], d[f"{k}_std"])]
+    paper = {"Chinee Apple": 0.885, "Snake Weed": 0.888}
+    d["paper_recall"] = d["class"].map(paper)
+    return d[["config", "class", "support", "precision", "recall", "f1", "paper_recall"]]
+
+
 def summary_table(bb_df, tr_df, inf_df, final_df) -> pd.DataFrame:
-    """Top 10 cấu hình theo macro-F1 val + dòng chung kết và mốc trên test."""
+    """Top 10 cấu hình theo macro-F1 val kèm chi phí/độ trễ, rồi dòng chung kết và mốc trên test."""
+    lat_of_bb = dict(zip(bb_df.backbone, bb_df.latency_b1_p95_ms))
     rows = []
     for r in bb_df.itertuples():
         rows.append({"exp_id": r.exp_id, "loại": "backbone", "mô tả": r.backbone, "val_macro_f1": r.val_macro_f1,
-                     "val_top1": r.val_top1, "p95_b1_ms": r.latency_b1_p95_ms})
+                     "val_top1": r.val_top1, "p95_b1_ms": r.latency_b1_p95_ms, "rel_cost": np.nan})
     for r in tr_df.itertuples():
         if r.exp_id == "T00":
             continue
         rows.append({"exp_id": r.exp_id, "loại": "huấn luyện", "mô tả": r.change_vs_T00,
-                     "val_macro_f1": r.val_macro_f1, "val_top1": r.val_top1, "p95_b1_ms": np.nan})
+                     "val_macro_f1": r.val_macro_f1, "val_top1": r.val_top1,
+                     "p95_b1_ms": lat_of_bb.get(r.backbone, np.nan), "rel_cost": 1.0})
     for r in inf_df[inf_df.val_macro_f1.notna()].itertuples():
         rows.append({"exp_id": r.exp_id, "loại": "suy luận", "mô tả": r.method, "val_macro_f1": r.val_macro_f1,
-                     "val_top1": r.val_top1, "p95_b1_ms": r.p95_ms})
+                     "val_top1": r.val_top1, "p95_b1_ms": r.p95_ms, "rel_cost": r.rel_cost_vs_I00})
     top = pd.DataFrame(rows).sort_values("val_macro_f1", ascending=False).head(10)
     fin = final_df[final_df.seed.astype(str).str.startswith("mean")][
-        ["exp_id", "seed", "val_macro_f1", "test_macro_f1", "test_top1", "test_ece"]]
-    fin = fin.rename(columns={"seed": "mô tả"}).assign(loại="chung kết (test)")
+        ["exp_id", "config", "seed", "val_macro_f1", "test_macro_f1", "test_top1", "test_ece"]]
+    fin = fin.rename(columns={"config": "mô tả", "seed": "số seed"}).assign(loại="chung kết (test)")
     return pd.concat([top, fin], ignore_index=True)
 
 
-def write_results_xlsx(path: str | Path, sheets: dict[str, pd.DataFrame], highlight: dict[str, str] | None = None) -> None:
-    """Ghi results.xlsx: cố định hàng tiêu đề, 4 chữ số thập phân, tự giãn cột, tô đậm dòng tốt nhất
-    (highlight = {sheet: tên cột để lấy max})."""
+def _rows_to_highlight(df: pd.DataFrame, rule) -> list[int]:
+    """rule: tên cột (lấy max) | ("min", cột) | callable(df) -> list chỉ số dòng."""
+    if callable(rule):
+        return list(rule(df))
+    how, col = ("max", rule) if isinstance(rule, str) else rule
+    vals = pd.to_numeric(df[col], errors="coerce") if col in df.columns else pd.Series(dtype=float)
+    if not vals.notna().any():
+        return []
+    return [int(vals.idxmax() if how == "max" else vals.idxmin())]
+
+
+DEFAULT_HIGHLIGHT = {
+    "Backbones": "val_macro_f1",
+    "Training": "val_macro_f1",
+    "Inference": "val_macro_f1",
+    "Final": lambda d: d.index[(d.exp_id == "F01") & d.seed.astype(str).str.startswith("mean")],
+    "PerClass": lambda d: d.index[(d["config"] == "F01") & d["class"].isin(RARE.keys())],
+    "Latency": lambda d: d.index[d.batch == 1][pd.to_numeric(d.loc[d.batch == 1, "p95_ms"]).argmin():][:1],
+    "Summary": lambda d: ([pd.to_numeric(d.val_macro_f1, errors="coerce").idxmax()]
+                          + list(d.index[d.exp_id.isin(["F01", "T00"]) & (d["loại"] == "chung kết (test)")])),
+}
+
+
+def write_results_xlsx(path: str | Path, sheets: dict[str, pd.DataFrame], highlight: dict | None = None) -> None:
+    """Ghi results.xlsx: cố định hàng tiêu đề, 4 chữ số thập phân, tự giãn cột, tô nổi bật dòng tốt nhất của
+    mỗi sheet (highlight mặc định DEFAULT_HIGHLIGHT; giá trị: cột lấy max, ("min", cột) hoặc hàm chọn dòng)."""
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
 
-    highlight = highlight or {}
+    highlight = {**DEFAULT_HIGHLIGHT, **(highlight or {})}
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         for name, df in sheets.items():
+            df = df.reset_index(drop=True)
             df.to_excel(xw, sheet_name=name, index=False)
             ws = xw.sheets[name]
             ws.freeze_panes = "A2"
@@ -772,12 +952,106 @@ def write_results_xlsx(path: str | Path, sheets: dict[str, pd.DataFrame], highli
                 if pd.api.types.is_float_dtype(df[col]):
                     for row in ws.iter_rows(min_row=2, min_col=j, max_col=j):
                         row[0].number_format = "0.0000"
-            col = highlight.get(name)
-            if col in df.columns and pd.to_numeric(df[col], errors="coerce").notna().any():
-                best = int(pd.to_numeric(df[col], errors="coerce").idxmax()) + 2
-                for cell in ws[best]:
+            rule = highlight.get(name)
+            try:
+                idx = _rows_to_highlight(df, rule) if rule is not None and len(df) else []
+            except Exception as e:  # tô màu chỉ là trình bày: không được làm hỏng việc ghi file
+                print(f"[{name}] bỏ qua tô màu: {e}")
+                idx = []
+            for i in idx:
+                for cell in ws[int(i) + 2]:
                     cell.fill = PatternFill("solid", fgColor="FFF2CC")
                     cell.font = Font(bold=True)
+
+
+def consistency_check(fin_df: pd.DataFrame, pc_df: pd.DataFrame, eval_out: str | Path, tol: float = 1e-6) -> list[str]:
+    """So số trong sheet Final/PerClass với JSON do `eval.py score` ghi ra. Trả về danh sách chỗ lệch (rỗng = khớp)."""
+    problems = []
+    for tag in fin_df.exp_id.unique():
+        f = Path(eval_out) / f"{tag}_summary.json"
+        if not f.exists():
+            problems.append(f"thiếu {f.name} (chưa chạy eval.py score cho {tag})")
+            continue
+        ev_sum = _read_json(f)
+        per = fin_df[(fin_df.exp_id == tag) & ~fin_df.seed.astype(str).str.startswith("mean")]
+        for mine, theirs in (("test_macro_f1", "macro_f1"), ("test_top1", "top1"), ("test_ece", "ece")):
+            a, b = float(pd.to_numeric(per[mine]).mean()), float(ev_sum[theirs]["mean"])
+            if abs(a - b) > tol:
+                problems.append(f"{tag} {mine}: Final {a:.6f} != eval.py {b:.6f}")
+        if sorted(int(x) for x in per.seed) != sorted(ev_sum["seeds"]):
+            problems.append(f"{tag}: seed trong Final {sorted(per.seed)} != eval.py {ev_sum['seeds']}")
+        for name, i in RARE.items():
+            sub = pc_df[(pc_df["config"] == tag) & (pc_df["class"] == name)] if len(pc_df) else pc_df
+            if len(sub):
+                a, b = float(sub["recall_mean"].iloc[0]), float(ev_sum["recall"]["mean"][i])
+                if abs(a - b) > tol:
+                    problems.append(f"{tag} recall {name}: PerClass {a:.6f} != eval.py {b:.6f}")
+    return problems
+
+
+def check_curves(out_dir: str | Path, curves_dir: str | Path) -> list[str]:
+    """Mỗi lần train (B, T, F; mọi seed) phải có ảnh curves/<exp_id>_<mota>[_seedk].png. Trả về danh sách thiếu."""
+    missing = []
+    for cj in sorted(Path(out_dir).glob("*/seed*/config.json")):
+        if not (cj.parent / "summary.json").exists():
+            continue
+        name = curve_path(Config(**_read_json(cj))).name
+        if not (Path(curves_dir) / name).exists():
+            missing.append(name)
+    return missing
+
+
+def contributions(bb_df, tr_df, inf_df, backbone: str, recipe_id: str, method: str, fin_df, noise: dict | None) -> pd.DataFrame:
+    """Bảng đóng góp: backbone / công thức / suy luận (trên val, 1 seed) và chung kết vs mốc (test, nhiều seed)."""
+    thr = (noise or {}).get("threshold", NOISE_F1)
+    ref = bb_df[bb_df.exp_id == "B01"].iloc[0]
+    chosen = bb_df[bb_df.backbone == backbone].iloc[0]
+    t00 = tr_df[(tr_df.exp_id == "T00") & (tr_df.seed == 0)].iloc[0]
+    rec = tr_df[(tr_df.exp_id == recipe_id) & (tr_df.seed == 0)].iloc[0]
+    i00 = inf_df[inf_df.exp_id == "I00"].iloc[0]
+    meth = inf_df[inf_df.exp_id == method].iloc[0]
+    rows = [
+        {"yếu tố": "backbone", "so sánh": f"{chosen.backbone} vs {ref.backbone} (B01, mốc)", "tập": "val, 1 seed",
+         "delta_macro_f1": chosen.val_macro_f1 - ref.val_macro_f1},
+        {"yếu tố": "công thức huấn luyện", "so sánh": f"{recipe_id} vs T00", "tập": "val, 1 seed",
+         "delta_macro_f1": rec.val_macro_f1 - t00.val_macro_f1},
+        {"yếu tố": "suy luận", "so sánh": f"{method} vs I00", "tập": "val, 1 seed",
+         "delta_macro_f1": meth.val_macro_f1 - i00.val_macro_f1},
+    ]
+    for r in rows:
+        r["noise_threshold"] = thr
+        r["kết luận"] = _vs_noise(r["delta_macro_f1"], thr)
+    fm = fin_df[fin_df.seed.astype(str).str.startswith("mean")].set_index("exp_id")
+    if {"F01", "T00"} <= set(fm.index):
+        per = fin_df[~fin_df.seed.astype(str).str.startswith("mean")]
+        f = pd.to_numeric(per[per.exp_id == "F01"].test_macro_f1)
+        b = pd.to_numeric(per[per.exp_id == "T00"].test_macro_f1)
+        d = f.mean() - b.mean()
+        sd = max(f.std(ddof=1), b.std(ddof=1))
+        rows.append({"yếu tố": "tổng (chung kết vs mốc)", "so sánh": "F01 vs T00+I00", "tập": f"test, {len(f)} seed",
+                     "delta_macro_f1": d, "noise_threshold": sd,
+                     "kết luận": ("vượt nhiễu (Δ > std lớn hơn của hai nhóm)" if d > sd else
+                                  "không phân biệt được (Δ ≤ std)" if d > -sd else "kém hơn rõ")})
+    return pd.DataFrame(rows)
+
+
+def experiment_index(out_dir: str | Path) -> pd.DataFrame:
+    """Phụ lục: mọi lần train, điểm khác so với T00 (seed 0), lần dùng lại và đường dẫn config.json."""
+    out_dir = Path(out_dir)
+    base_p = out_dir / "T00" / "seed0" / "config.json"
+    base = _recipe(_read_json(base_p)) if base_p.exists() else {}
+    rows = []
+    for cj in sorted(out_dir.glob("*/seed*/config.json")):
+        sp = cj.parent / "summary.json"
+        if not sp.exists():
+            continue
+        c, sm = _read_json(cj), _read_json(sp)
+        diff = {k: v for k, v in _recipe(c).items() if k not in ("seed",) and base.get(k) != v}
+        rows.append({"exp_id": c["exp_id"], "seed": c["seed"], "backbone": c["backbone"],
+                     "khác T00": ", ".join(f"{k}={v}" for k, v in diff.items()) or "-",
+                     "val_macro_f1": sm["val_macro_f1"], "best_epoch": sm["best_epoch"],
+                     "reused_from": sm.get("reused_from", ""), "config": str(cj.relative_to(out_dir))})
+    return pd.DataFrame(rows)
 
 
 # ============================================================================= tiện ích cho notebook
@@ -785,10 +1059,11 @@ def run_summary(paths: dict, exp_id: str, seed: int = 0) -> dict:
     return _read_json(Path(paths["out_dir"]) / exp_id / f"seed{seed}" / "summary.json")
 
 
-def add_combo_row(tr_df: pd.DataFrame, combo_summary: dict, reason: str) -> pd.DataFrame:
-    base = tr_df.loc[tr_df.exp_id == "T00", "val_macro_f1"].item()
+def add_combo_row(tr_df: pd.DataFrame, combo_summary: dict, reason: str, noise: dict | None = None) -> pd.DataFrame:
+    base = tr_df.loc[(tr_df.exp_id == "T00") & (tr_df.seed == 0), "val_macro_f1"].item()
     row = _training_row(combo_summary, COMBO_ID, "kết hợp", reason, base)
-    return pd.concat([tr_df[tr_df.exp_id != COMBO_ID], pd.DataFrame([row])], ignore_index=True)
+    df = pd.concat([tr_df[tr_df.exp_id != COMBO_ID], pd.DataFrame([row])], ignore_index=True)
+    return annotate_noise(df, noise)
 
 
 def ensemble_candidates(paths: dict, *dfs: pd.DataFrame, k: int = 3) -> list[dict]:
@@ -843,24 +1118,30 @@ def md_table(df: pd.DataFrame, cols: list[str] | None = None, digits: int = 4) -
 
 REPORT_TEMPLATE = """# Báo cáo Lab Day 2 — DeepWeeds · Nguyễn Văn Quốc Việt · 2A202602973
 
-> Bản nháp sinh tự động từ kết quả chạy thật (bảng số liệu, lý do chọn cấu hình). Các mục **TODO** là phần
-> nhận xét, phân tích bạn tự viết.
+> Bản nháp sinh tự động từ kết quả chạy thật: mọi bảng lấy từ `results.xlsx` / output của `eval.py`, mọi lựa chọn
+> kèm lý do theo quy tắc trên val. Các mục **TODO** là phần nhận xét, phân tích bạn tự viết.
+> Kiểm tra khớp số (Final/PerClass so với `eval.py score`): {consistency}
 
 ## 1. Tóm tắt
 - Cấu hình tốt nhất F01: backbone `{backbone}` + công thức `{recipe_id}` + suy luận `{method}` + temperature scaling.
-- Test (mean ± std, {n_seed}): macro-F1 **{f_mf1}**, top-1 **{f_top1}**, ECE {f_ece}.
+- Test ({n_seed}): macro-F1 **{f_mf1}**, top-1 **{f_top1}**, ECE {f_ece}.
 - Mốc T00 + I00: macro-F1 {b_mf1}, top-1 {b_top1}.
-- TODO: 3–5 dòng kết luận chính (yếu tố nào đóng góp nhiều nhất, có vượt nhiễu không).
+- TODO: 3–5 dòng kết luận chính (dựa vào bảng đóng góp ở mục 7).
 
 ## 2. Dữ liệu và thiết lập
 - DeepWeeds, fold 0 chia sẵn (train_subset0 / val_subset0 / test_subset0), không sửa, không lọc, không chia lại.
 {split_md}- Chỉ số chính: macro-F1 (9 lớp, `eval.compute_metrics`); phụ: top-1, balanced accuracy, F1/recall từng lớp, ECE 15 bin.
-- Công thức nền T00: ImageNet pretrained, tinh chỉnh toàn bộ, RandomResizedCrop 224 + lật ngang, AdamW (LR backbone 1e-4,
+- Công thức nền T00: ImageNet-1k pretrained, tinh chỉnh toàn bộ, RandomResizedCrop 224 + lật ngang, AdamW (LR backbone 1e-4,
   head 1e-3, weight decay 0,05 trừ norm/bias), warmup 1 epoch + cosine theo bước, CE, batch 64, {epochs} epoch, AMP,
   channels_last, chọn checkpoint theo macro-F1 val (hòa lấy epoch sớm hơn).
-- Val/test: resize 256 → center crop 224, chuẩn hoá theo mean/std của trọng số. Seed 0 cho quét sàng; 0, 1, 2 cho chung kết.
+- Val/test: resize 256 → center crop 224, chuẩn hoá theo mean/std của từng bộ trọng số. Seed 0 cho quét sàng; 0, 1, 2 cho chung kết.
 - Môi trường: {env}.
-{pipeline_md}- TODO: chèn biểu đồ phân bố lớp và ảnh mẫu từ notebook (Bước 0); nhận xét mất cân bằng và cặp loài dễ nhầm.
+{pipeline_md}
+![Phân bố lớp](figures/eda_class_distribution.png)
+
+![Ảnh mẫu](figures/eda_samples.png)
+
+TODO: nhận xét mất cân bằng (Negatives ≈ 52%) và cặp loài dễ nhầm bằng mắt thường; Negatives trông ra sao.
 
 ## 3. So sánh backbone (Bước 1, 1 seed)
 {bb_table}
@@ -878,19 +1159,21 @@ Tương quan thứ hạng (5 backbone, chỉ tham khảo): {bb_corr}
 
 **Lựa chọn (quy tắc trên val):** {why_bb}
 
-TODO: backbone nào hội tụ nhanh nhất / có overfit không (bảng trên + `curves/B0x_*.png`); thứ hạng trên DeepWeeds so
-với ImageNet; FLOPs có dự đoán được thời gian train và độ trễ không (tương quan trên; slide trang 43). Ghi rõ đây là
-kết quả 1 seed: chênh lệch < {noise} macro-F1 là không phân biệt được.
+TODO: backbone nào hội tụ nhanh nhất / có overfit không; thứ hạng trên DeepWeeds so với ImageNet; FLOPs có dự đoán
+được thời gian train và độ trễ không (slide trang 43). Đây là kết quả 1 seed: chênh lệch < {noise_b1} là không phân biệt được.
 
-## 4. Công thức huấn luyện (Bước 2, 1 seed, ngưỡng nhiễu {noise})
+## 4. Công thức huấn luyện (Bước 2, 1 seed mỗi biến thể)
+Nhiễu đo được: T00 với seed {noise_seeds} có macro-F1 val {noise_vals}, mean {noise_mean:.4f}, std (ddof=1) {noise_std:.4f}.
+Ngưỡng dùng để kết luận = max(std, {noise_floor}) = **{noise_thr:.4f}**: |Δ| ≤ ngưỡng thì ghi "không phân biệt được".
+
 {tr_table}
 
-Mỗi T0x khác T00 đúng một yếu tố. Kết hợp theo kiểu tham lam theo trục: {why_combo}
+Mỗi T0x khác T00 đúng một yếu tố. {why_combo}
 
 **Công thức chung kết:** {why_recipe}
 
-TODO: yếu tố nào giúp / không giúp và vì sao (liên hệ slide); chênh lệch nhỏ hơn nhiễu ghi "không phân biệt được";
-hiệu ứng có cộng dồn khi kết hợp không.
+TODO: yếu tố nào giúp / không giúp và vì sao (liên hệ slide); sampler (T09) khác loss có trọng số (T07) thế nào;
+hiệu ứng có cộng dồn khi kết hợp (T10) không.
 
 ## 5. Suy luận (Bước 3, trên val)
 {inf_table}
@@ -898,26 +1181,38 @@ hiệu ứng có cộng dồn khi kết hợp không.
 ![tradeoff](figures/tradeoff.png)
 
 Độ trễ: warmup 10 lần, `torch.cuda.synchronize()` trước và sau, 100 lần đo, báo p50/p95/p99, chỉ đo forward
-(không tính tiền xử lý), GPU {gpu}. Bảng đầy đủ (batch 1 và 32, FP32/AMP/FP16, có/không gộp BN) ở sheet Latency.
+(không tính tiền xử lý), GPU {gpu}, torch {torch}. Thông lượng đo ở batch 32. Bảng đầy đủ (batch 1 và 32,
+FP32/AMP/FP16, có/không gộp BN) ở sheet Latency.
+
+Temperature scaling (I07): ECE val trước {ece_before}, sau {ece_after} (in-sample), {ece_cf} (cross-fit hai nửa val); T = {temp}.
+
+**Đánh đổi (số liệu cho câu hỏi "TTA/ensemble hợp ngoại tuyến, robot dùng thứ không tốn thêm"):** {tradeoff}
 
 **Phương pháp cho chung kết:** {why_inf} Temperature scaling (T khớp trên val của từng seed) luôn áp dụng thêm.
 
-TODO: TTA tăng bao nhiêu và tốn bao nhiêu lần độ trễ; ECE trước/sau; độ phân giải kiểm tra (FixRes);
-phương pháp nào hợp ngoại tuyến, phương pháp nào hợp thời gian thực.
+TODO: TTA tăng bao nhiêu và tốn bao nhiêu lần độ trễ; EMA vs không EMA (I06 vs I06_raw, cùng lần chạy); soup vs
+ensemble seed; độ phân giải kiểm tra (FixRes); dữ liệu có ủng hộ nhận định của slide không.
 
 ## 6. Cấu hình tốt nhất và kết quả test (Bước 4)
-Test chạy đúng một lần cho mỗi seed, sau khi đã chốt mọi lựa chọn trên val. F01rt = cùng mô hình F01, 1 view
-(cấu hình thời gian thực, p95 batch 1 = {rt_p95:.1f} ms theo {rt_src}). F01uncal = F01 chưa temperature scaling.
+Tái lập: {final_desc}. Huấn luyện bằng `train.run(Config(...))` với các tham số ở phụ lục; test chạy đúng một lần cho
+mỗi seed, sau khi đã chốt mọi lựa chọn trên val. F01rt = cùng mô hình F01, 1 view (thời gian thực, p95 batch 1 =
+{rt_p95:.1f} ms theo {rt_src}). F01uncal = F01 chưa temperature scaling.
 
 {fin_table}
 
-Theo lớp (test, mean qua seed):
+Hai lớp khó (test, mean ± std qua seed; recall bài báo chỉ để tham chiếu):
 
-{pc_table}
+{hard_table}
+
+Các cặp bị nhầm nhiều nhất (F01, tổng các seed):
+
+{confusions}
 
 ![confusion](figures/confusion_F01.png)
 
-![errors](figures/errors_chinee_snake.png)
+![errors Chinee Apple ↔ Snake Weed](figures/errors_chinee_snake.png)
+
+![errors cặp nhầm nhiều nhất](figures/errors_top_pair.png)
 
 Tự chấm phần I (`eval.py grade`, đề xuất):
 
@@ -925,31 +1220,46 @@ Tự chấm phần I (`eval.py grade`, đề xuất):
 {grade}
 ```
 
-TODO: lớp còn nhầm nhiều nhất và giả thuyết (xem ảnh sai Chinee Apple ↔ Snake Weed); so với bài báo
-(95,7% / 95,1%, điều kiện huấn luyện khác: 100 epoch, augmentation mạnh).
+TODO: giả thuyết cho các cặp nhầm (xem ảnh sai); so với bài báo (95,7% / 95,1%; Chinee 88,5%, Snake 88,8%) nhớ rằng
+điều kiện huấn luyện khác (100 epoch, augmentation mạnh).
 
 ## 7. Kết luận và khuyến nghị
-- TODO: cấu hình tốt nhất, tốt hơn mốc bao nhiêu, có vượt std không.
-- TODO: yếu tố đóng góp nhiều nhất (backbone, huấn luyện hay suy luận).
-- TODO: triển khai trên robot với ngân sách 30–100 ms/khung: chọn gì và vì sao.
+Bảng đóng góp (ngưỡng nhiễu: val dùng ngưỡng đo ở mục 4; test dùng std lớn hơn của hai nhóm seed, như tiêu chí I2):
 
-## 8. Hạn chế
-- Quét sàng Bước 1–2 chỉ 1 seed; chung kết 3 seed; chỉ fold 0.
-- Chia ngẫu nhiên, không theo địa điểm, nên điểm test có thể lạc quan khi gặp địa điểm/mùa mới.
-- Giảm bớt do ngân sách GPU (một session Kaggle 12 giờ): {epoch_note}5 backbone, ablation trên 1 backbone. T00 seed 0 dùng lại lần
-  chạy Bước 1, F01 seed 0 dùng lại lần chạy tốt nhất Bước 2 (cùng cấu hình, cùng seed; ghi ở cột reused_from).
-- TODO: thí nghiệm thất bại hoặc bất thường (nếu có).
+{contrib}
+
+- TODO: cấu hình tốt nhất, tốt hơn mốc bao nhiêu, có vượt std không (dòng cuối bảng trên).
+- TODO: yếu tố đóng góp nhiều nhất (backbone, huấn luyện hay suy luận).
+- TODO: triển khai trên robot với ngân sách 30–100 ms/khung: chọn gì và vì sao (F01rt, sheet Latency).
+
+## 8. Hạn chế và việc tiếp theo
+- Quét sàng Bước 1–2 chỉ 1 seed mỗi biến thể; nhiễu đo bằng 3 seed của T00; chung kết 3 seed; chỉ fold 0.
+- Chia ngẫu nhiên, không theo địa điểm, nên điểm test có thể lạc quan khi gặp địa điểm/mùa/góc chụp/ánh sáng mới.
+- Giảm bớt do ngân sách GPU (một session Kaggle 12 giờ): {epoch_note}5 backbone, ablation trên 1 backbone. T00 seed 0 dùng
+  lại lần chạy Bước 1, F01 seed 0 dùng lại lần chạy tốt nhất Bước 2 (cùng cấu hình, cùng seed; cột reused_from).
+- TODO: thí nghiệm thất bại hoặc bất thường (nếu có); việc tiếp theo (nhiều fold, chưng cất, thích ứng miền...).
 
 ## 9. Phụ lục
-- Cấu hình đầy đủ từng lần chạy: `runs/<exp_id>/seed<k>/config.json`; bảng đầy đủ trong `results.xlsx`.
-- Notebook: `code/lab_day2.ipynb` (link Colab: TODO).
+Danh sách mọi lần train (khác T00 ở đâu, config đầy đủ tại `runs/<exp_id>/seed<k>/config.json`):
+
+{exp_index}
+
+- Bảng đầy đủ: `results.xlsx`. Notebook: `code/lab_day2.ipynb` (link Kaggle: TODO).
 """
 
 
+def _get_row(df: pd.DataFrame, code: str, col: str):
+    r = df[df.exp_id == code]
+    return r[col].iloc[0] if len(r) and col in r else float("nan")
+
+
 def write_report_draft(path: str | Path, *, env: dict, split_stats: dict | None, backbone: str, bb_df, why_bb,
-                       pipeline_checks: dict | None = None, bb_corr: dict | None = None,
                        tr_df, why_combo, recipe_id: str, why_recipe, inf_df, method: str, why_inf, fin_df, pc_df,
-                       rt_p95: float, rt_src: str, epochs: int, grade_text: str = "", overwrite: bool = False) -> Path:
+                       rt_p95: float, rt_src: str, epochs: int, final_desc: str = "", grade_text: str = "",
+                       pipeline_checks: dict | None = None, bb_corr: dict | None = None, noise: dict | None = None,
+                       tradeoff: str = "", confusions: pd.DataFrame | None = None, contrib: pd.DataFrame | None = None,
+                       exp_index: pd.DataFrame | None = None, consistency: list[str] | None = None,
+                       overwrite: bool = False) -> Path:
     """Bản nháp report.md theo dàn ý GUIDE mục 6.3: điền sẵn BẢNG SỐ LIỆU thật và lý do chọn cấu hình;
     phần nhận xét để dạng TODO. Không ghi đè file đã có (trừ khi overwrite=True)."""
     path = Path(path)
@@ -974,13 +1284,17 @@ def write_report_draft(path: str | Path, *, env: dict, split_stats: dict | None,
         pipeline_md = ("- Kiểm tra pipeline (Bước 0, ResNet-50): "
                        + "; ".join(f"{k} = {v}" for k, v in pipeline_checks.items())
                        + f" (kỳ vọng loss ban đầu ≈ ln 9 = {np.log(9):.3f}).\n")
+    f01_pc = pc_df[pc_df["config"] == "F01"] if len(pc_df) else pc_df
     txt = REPORT_TEMPLATE.format(
-        backbone=backbone, recipe_id=recipe_id, epochs=epochs,
+        consistency=("KHỚP" if consistency == [] else "CHƯA KIỂM TRA" if consistency is None
+                     else "LỆCH: " + "; ".join(consistency)),
+        backbone=backbone, recipe_id=recipe_id, epochs=epochs, method=method, n_seed=get("F01", "seed"),
         epoch_note=(f"{epochs} epoch cho mọi thí nghiệm (GUIDE gợi ý 10–15), " if epochs < 10 else
-                    f"{epochs} epoch (bài báo ~100 epoch nên số tuyệt đối có thể thấp hơn bài báo), "), method=method, n_seed=get("F01", "seed"),
+                    f"{epochs} epoch (bài báo ~100 epoch nên số tuyệt đối có thể thấp hơn bài báo), "),
         f_mf1=get("F01", "test_macro_f1"), f_top1=get("F01", "test_top1"), f_ece=get("F01", "test_ece"),
         b_mf1=get("T00", "test_macro_f1"), b_top1=get("T00", "test_top1"), split_md=split_md, pipeline_md=pipeline_md,
-        env=", ".join(f"{k} {v}" for k, v in env.items()), gpu=env.get("gpu"), noise=NOISE_F1,
+        env=", ".join(f"{k} {v}" for k, v in env.items()), gpu=env.get("gpu"), torch=env.get("torch"),
+        noise_b1=NOISE_F1,
         bb_table=md_table(bb_df, ["exp_id", "backbone", "weights_tag", "params_M", "gmacs", "best_epoch",
                                   "val_macro_f1", "val_top1", "train_time_per_epoch_s", "latency_b1_p50_ms",
                                   "latency_b1_p95_ms"]),
@@ -988,13 +1302,27 @@ def write_report_draft(path: str | Path, *, env: dict, split_stats: dict | None,
         bb_analysis=md_table(bb_df, ["exp_id", "backbone", "best_epoch", "epochs_to_99pct", "val_loss_min_epoch",
                                      "val_loss_rise", "overfit", "train_val_gap_last"]),
         bb_corr=", ".join(f"{k} = {v:.2f}" for k, v in (bb_corr or {}).items()) or "(chưa tính)",
-        tr_table=md_table(tr_df, ["exp_id", "axis", "change_vs_T00", "val_macro_f1", "val_top1", "delta_vs_T00",
-                                  "f1_chinee", "f1_snake", "reused_from"]),
+        noise_seeds=(noise or {}).get("seeds", "?"),
+        noise_vals=[round(v, 4) for v in (noise or {}).get("val_macro_f1", [])],
+        noise_mean=(noise or {}).get("mean", float("nan")), noise_std=(noise or {}).get("std", float("nan")),
+        noise_thr=(noise or {}).get("threshold", NOISE_F1), noise_floor=NOISE_FLOOR,
+        tr_table=md_table(tr_df, ["exp_id", "axis", "change_vs_T00", "seed", "val_macro_f1", "val_top1",
+                                  "delta_vs_T00", "vs_noise", "f1_chinee", "f1_snake", "note"]),
         why_combo=why_combo, why_recipe=why_recipe,
         inf_table=md_table(inf_df, ["exp_id", "method", "K", "img_size", "val_macro_f1", "val_top1", "val_ece",
-                                    "p50_ms", "p95_ms", "p99_ms", "rel_cost_vs_I00", "note"]),
-        why_inf=why_inf, rt_p95=rt_p95, rt_src=rt_src, fin_table=md_table(fin_df),
-        pc_table=md_table(pc_df) if len(pc_df) else "(chưa có)", grade=grade_text.strip())
+                                    "p50_ms", "p95_ms", "p99_ms", "images_per_s_b32", "rel_cost_vs_I00",
+                                    "cost_class", "realtime_ok", "note"]),
+        ece_before=_fmt(_get_row(inf_df, "I07", "val_ece_before")), ece_after=_fmt(_get_row(inf_df, "I07", "val_ece")),
+        ece_cf=_fmt(_get_row(inf_df, "I07", "val_ece_crossfit")), temp=_fmt(_get_row(inf_df, "I07", "temperature"), 3),
+        tradeoff=tradeoff or "(chưa tính)", why_inf=why_inf,
+        final_desc=final_desc or "(xem sheet Final)", rt_p95=rt_p95, rt_src=rt_src,
+        fin_table=md_table(fin_df),
+        hard_table=md_table(hard_class_table(pc_df)) if len(pc_df) else "(chưa có)",
+        confusions=md_table(confusions, ["true", "pred", "n_images", "pct_of_true_class"])
+        if confusions is not None and len(confusions) else "(chưa có)",
+        grade=grade_text.strip(),
+        contrib=md_table(contrib) if contrib is not None and len(contrib) else "(chưa có)",
+        exp_index=md_table(exp_index) if exp_index is not None and len(exp_index) else "(chưa có)")
     path.write_text(txt, encoding="utf-8")
     print("Đã ghi bản nháp", path)
     return path

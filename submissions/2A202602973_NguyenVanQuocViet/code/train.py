@@ -380,6 +380,8 @@ def run(cfg: Config) -> dict:
             best_state = {k: v.detach().cpu().clone() for k, v in eval_model.state_dict().items()}
             if cfg.save_checkpoint:
                 torch.save(best_state, out / "best.pt")
+                if ema is not None:  # trọng số THƯỜNG cùng epoch: so EMA vs không EMA trong cùng lần chạy (I06)
+                    torch.save({k: v.detach().cpu() for k, v in model.state_dict().items()}, out / "best_raw.pt")
         print(f"  epoch {epoch:2d} | train_loss {tr['train_loss']:.4f} | val_loss {val_loss:.4f} | "
               f"val top-1 {m['top1']:.4f} | val macro-F1 {m['macro_f1']:.4f}{' *' if improved else ''} | "
               f"{epoch_times[-1]:.0f}s")
@@ -398,6 +400,7 @@ def run(cfg: Config) -> dict:
         "val_balanced_acc": m_val["balanced_acc"], "val_ece": m_val["ece"],
         "train_time_per_epoch_s": float(np.mean(epoch_times)), "run_dir": str(out),
         "checkpoint": str(out / "best.pt") if cfg.save_checkpoint else None,
+        "checkpoint_raw": str(out / "best_raw.pt") if (cfg.save_checkpoint and ema is not None) else None,
     }
 
     # 7. test: chỉ ở Bước 4, đúng MỘT lần với checkpoint đã chọn trên val
