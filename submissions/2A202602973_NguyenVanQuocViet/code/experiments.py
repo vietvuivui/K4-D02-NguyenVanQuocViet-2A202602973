@@ -1279,6 +1279,14 @@ def write_report_draft(path: str | Path, *, env: dict, split_stats: dict | None,
                     "Số ảnh mỗi lớp trong từng tập:\n\n"
                     + md_table(pd.DataFrame(split_stats["per_class"]).rename_axis("lớp").reset_index(), digits=0)
                     + "\n\n")
+        for r in split_stats.get("label_mismatch_rows") or []:
+            lab = r["label_labels_csv"]
+            split_md += (f"- Dữ liệu gốc có nhãn không nhất quán: `{r['Filename']}` ({r['split']}) được ghi lớp "
+                         f"{r['label_split_csv']} ({D.CLASS_NAMES[r['label_split_csv']]}) trong file split nhưng "
+                         + (f"lớp {lab} ({D.CLASS_NAMES[lab]})" if lab is not None else "không có")
+                         + " trong labels.csv. Theo S1 giữ nguyên file split (không sửa); "
+                         + ("ảnh thuộc train nên không ảnh hưởng chỉ số val/test." if r["split"] == "train" else
+                            "ảnh thuộc tập đánh giá: ghi nhận như một hạn chế.") + "\n")
     pipeline_md = ""
     if pipeline_checks:
         pipeline_md = ("- Kiểm tra pipeline (Bước 0, ResNet-50): "
