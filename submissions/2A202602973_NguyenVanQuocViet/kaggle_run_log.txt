@@ -1,0 +1,622 @@
+0.00s - Debugger warning: It seems that frozen modules are being used, which may
+0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+0.00s - to python to disable frozen modules.
+0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+0.00s - Debugger warning: It seems that frozen modules are being used, which may
+0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+0.00s - to python to disable frozen modules.
+0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+python 3.13.15 | torch 2.11.0+cu128 | timm 1.0.29
+GPU: Tesla T4
+20160928-140314-0.jpg
+20160928-140337-0.jpg
+20160928-140731-0.jpg
+20160928-140747-0.jpg
+20160928-141107-0.jpg
+20160928-141135-0.jpg
+20160928-141355-0.jpg
+20160928-141421-0.jpg
+20160928-141437-0.jpg
+20160928-142056-0.jpg
+ls: write error: Broken pipe
+total 1856
+drwxr-xr-x 2 root root   4096 Oct  4 08:40 .
+drwxr-xr-x 3 root root 864256 Oct  4 08:40 ..
+-rw-r--r-- 1 root root 598898 Oct  4 08:40 labels.csv
+-rw-r--r-- 1 root root  84183 Oct  4 08:40 test_subset0.csv
+-rw-r--r-- 1 root root 252039 Oct  4 08:40 train_subset0.csv
+-rw-r--r-- 1 root root  84039 Oct  4 08:40 val_subset0.csv
+IMAGES_DIR = data
+RUNS_DIR = /kaggle/working/deepweeds_runs | device = cuda | num_workers = 4 | {'epochs': 12}
+Số ảnh mỗi tập: {'train': 10501, 'val': 3501, 'test': 3507} | tỉ lệ: {'train': '59.97%', 'val': '20.00%', 'test': '20.03%'}
+Số ảnh mỗi lớp:
+                 train   val  test  total
+Chinee Apple      675   225   226   1126
+Lantana           637   213   213   1063
+Parkinsonia       618   206   207   1031
+Parthenium        613   204   205   1022
+Prickly Acacia    637   212   213   1062
+Rubber Vine       605   202   202   1009
+Siam Weed         644   215   215   1074
+Snake Weed        609   203   204   1016
+Negatives        5463  1821  1822   9106
+Giao từng cặp: {'train∩val': 0, 'train∩test': 0, 'val∩test': 0} | hợp ba tập: 17509 | trùng trong tập: {'train': 0, 'val': 0, 'test': 0}
+File thiếu trong data: 0 []
+Tỉ lệ lớp nhiều nhất / ít nhất = Negatives 9106 / Rubber Vine 1009 = 9.02
+Nhãn lệch so với labels.csv gốc: 1
+  CẢNH BÁO: 20170714-110407-3.jpg (train): file split ghi 0, labels.csv ghi 1 -> lệch có sẵn trong dữ liệu gốc của tác giả; giữ nguyên CSV (S1), ghi vào báo cáo
+
+KẾT LUẬN: giao rỗng: True | hợp = 17509 | thiếu file: 0 | nhãn lệch labels.csv: 1 | cảnh báo tỉ lệ: không
+Tỉ lệ lớp nhiều nhất / ít nhất = Negatives 9106 / Rubber Vine 1009 = 9.02
+Kích thước (W, H) và mode: {((256, 256), 'RGB'): 17509}
+mean RGB train ~ [0.34  0.351 0.343] | std ~ [0.227 0.227 0.224] | ImageNet: (0.485, 0.456, 0.406) (0.229, 0.224, 0.225)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+trọng số: resnet50.a1_in1k | mean/std: (0.485, 0.456, 0.406) (0.229, 0.224, 0.225)
+(1) seed tái lập thứ tự + augmentation: OK
+(2) loss ban đầu 2.185 (kỳ vọng ~2.197)
+(3) step  0 loss 2.2264
+(3) step 10 loss 0.6775
+(3) step 20 loss 0.3513
+(3) step 30 loss 0.1276
+(3) step 40 loss 0.0405
+(3) step 50 loss 0.0155
+(3) step 59 loss 0.0089
+(5) evaluate() -> eval: OK | frozen: head ở train, 53 BN ở eval: OK
+PIPELINE_CHECKS = {'seed_reproducible': True, 'initial_loss': 2.1851, 'overfit_batch': 32, 'overfit_steps': 60, 'overfit_final_loss': 0.00892, 'augmentation_plot': 'ô 0.4, hình (4)', 'eval_mode_ok': True, 'frozen_bn_eval': 53}
+........LỖI: /tmp/tmpj_s9n3hq/F01_seed0_test.csv: không khớp test CSV (/tmp/tmpj_s9n3hq/short.csv): thừa 590 ảnh, thiếu 0 ảnh
+..............................
+----------------------------------------------------------------------
+Ran 38 tests in 1.003s
+
+OK
+S1: nhãn trong file split khác labels.csv gốc -> phát hiện và báo chi tiết, KHÔNG dừng ... ok
+test_dataset_item_contract (test_code.TestDataAndEvaluate.test_dataset_item_contract) ... ok
+test_eval_loader_keeps_order (test_code.TestDataAndEvaluate.test_eval_loader_keeps_order)
+evaluate giữ thứ tự df; model.eval() được gọi (Dropout tắt -> hai lần chạy giống nhau). ... ok
+test_train_loader_seeded (test_code.TestDataAndEvaluate.test_train_loader_seeded) ... ok
+test_aggregate (test_code.TestInference.test_aggregate) ... ok
+test_fuse_conv_bn_exact (test_code.TestInference.test_fuse_conv_bn_exact) ... ok
+test_temperature (test_code.TestInference.test_temperature) ... ok
+test_class_weights (test_code.TestLosses.test_class_weights) ... ok
+test_cutmix_mixes_image_and_label (test_code.TestLosses.test_cutmix_mixes_image_and_label)
+Ảnh i tô giá trị i; sau CutMix, tỉ lệ pixel lấy từ ảnh khác phải đúng bằng 1 - lam, và y_b = y[perm]. ... ok
+test_focal_downweights_easy_examples (test_code.TestLosses.test_focal_downweights_easy_examples) ... ok
+test_focal_gamma0_equals_ce (test_code.TestLosses.test_focal_gamma0_equals_ce) ... ok
+test_label_smoothing (test_code.TestLosses.test_label_smoothing) ... ok
+test_mixup_and_mixed_loss (test_code.TestLosses.test_mixup_and_mixed_loss) ... ok
+test_count (test_code.TestModel.test_count) ... ok
+test_finetune_train_mode (test_code.TestModel.test_finetune_train_mode) ... ok
+test_freeze_keeps_bn_eval (test_code.TestModel.test_freeze_keeps_bn_eval) ... ok
+test_param_groups (test_code.TestModel.test_param_groups) ... ok
+test_ema (test_code.TestTrain.test_ema) ... ok
+test_initial_loss_near_ln9 (test_code.TestTrain.test_initial_loss_near_ln9) ... ok
+test_parse_overrides (test_code.TestTrain.test_parse_overrides) ... ok
+test_scheduler_warmup_cosine (test_code.TestTrain.test_scheduler_warmup_cosine) ... ok
+
+----------------------------------------------------------------------
+Ran 23 tests in 1.337s
+
+OK
+fuse_conv_bn: đã gộp 2 cặp Conv2d+BatchNorm2d
+fuse_conv_bn: sai số lớn nhất trước/sau gộp = 2.98e-08
+Ngưỡng quy tắc chọn: NOISE_F1 = 0.005 | INFER_MIN_GAIN = 0.002
+resnet50.a1_in1k                     có sẵn: ['resnet50.a1_in1k', 'resnet50.a1h_in1k', 'resnet50.a2_in1k', 'resnet50.a3_in1k', 'resnet50.am_in1k', 'resnet50.b1k_in1k', 'resnet50.b2k_in1k', 'resnet50.bt_in1k', 'resnet50.c1_in1k', 'resnet50.c2_in1k', 'resnet50.d_in1k', 'resnet50.fb_ssl_yfcc100m_ft_in1k', 'resnet50.fb_swsl_ig1b_ft_in1k', 'resnet50.gluon_in1k', 'resnet50.ra_in1k', 'resnet50.ram_in1k', 'resnet50.tv2_in1k', 'resnet50.tv_in1k']
+convnext_tiny.fb_in1k                có sẵn: ['convnext_tiny.dinov3_lvd1689m', 'convnext_tiny.eupe_lvd1689m', 'convnext_tiny.fb_in1k', 'convnext_tiny.fb_in22k', 'convnext_tiny.fb_in22k_ft_in1k', 'convnext_tiny.fb_in22k_ft_in1k_384', 'convnext_tiny.in12k', 'convnext_tiny.in12k_ft_in1k', 'convnext_tiny.in12k_ft_in1k_384']
+deit_small_patch16_224.fb_in1k       có sẵn: ['deit_small_patch16_224.fb_in1k']
+efficientnet_b0.ra_in1k              có sẵn: ['efficientnet_b0.ra4_e3600_r224_in1k', 'efficientnet_b0.ra_in1k']
+mobilenetv3_large_100.ra_in1k        có sẵn: ['mobilenetv3_large_100.miil_in21k', 'mobilenetv3_large_100.miil_in21k_ft_in1k', 'mobilenetv3_large_100.ra4_e3600_r224_in1k', 'mobilenetv3_large_100.ra_in1k']
+[B01 seed0] resnet50.a1_in1k (resnet50.a1_in1k) | 23.5M params | 4.09 GMAC | device cuda
+  epoch  1 | train_loss 1.6493 | val_loss 1.2603 | val top-1 0.5724 | val macro-F1 0.2379 * | 37s
+  epoch  2 | train_loss 0.9708 | val_loss 0.7909 | val top-1 0.7212 | val macro-F1 0.5945 * | 33s
+  epoch  3 | train_loss 0.7023 | val_loss 0.6136 | val top-1 0.7852 | val macro-F1 0.6989 * | 35s
+  epoch  4 | train_loss 0.5713 | val_loss 0.5675 | val top-1 0.8029 | val macro-F1 0.7258 * | 37s
+  epoch  5 | train_loss 0.5030 | val_loss 0.5268 | val top-1 0.8235 | val macro-F1 0.7551 * | 36s
+  epoch  6 | train_loss 0.4713 | val_loss 0.4750 | val top-1 0.8446 | val macro-F1 0.7861 * | 38s
+  epoch  7 | train_loss 0.4281 | val_loss 0.4573 | val top-1 0.8498 | val macro-F1 0.7923 * | 38s
+  epoch  8 | train_loss 0.4053 | val_loss 0.4391 | val top-1 0.8580 | val macro-F1 0.8067 * | 38s
+  epoch  9 | train_loss 0.3935 | val_loss 0.4288 | val top-1 0.8615 | val macro-F1 0.8085 * | 38s
+  epoch 10 | train_loss 0.3812 | val_loss 0.4262 | val top-1 0.8620 | val macro-F1 0.8106 * | 39s
+  epoch 11 | train_loss 0.3824 | val_loss 0.4206 | val top-1 0.8640 | val macro-F1 0.8133 * | 39s
+  epoch 12 | train_loss 0.3870 | val_loss 0.4265 | val top-1 0.8615 | val macro-F1 0.8113 | 39s
+[B01 seed0] xong: best epoch 11, val macro-F1 0.8133, top-1 0.8640
+[B02 seed0] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.2320 | val_loss 0.5023 | val top-1 0.8286 | val macro-F1 0.7719 * | 88s
+  epoch  2 | train_loss 0.3887 | val_loss 0.2800 | val top-1 0.9069 | val macro-F1 0.8737 * | 58s
+  epoch  3 | train_loss 0.2396 | val_loss 0.2519 | val top-1 0.9197 | val macro-F1 0.8971 * | 57s
+  epoch  4 | train_loss 0.1836 | val_loss 0.1716 | val top-1 0.9452 | val macro-F1 0.9268 * | 57s
+  epoch  5 | train_loss 0.1525 | val_loss 0.1515 | val top-1 0.9526 | val macro-F1 0.9367 * | 57s
+  epoch  6 | train_loss 0.1191 | val_loss 0.1507 | val top-1 0.9557 | val macro-F1 0.9421 * | 57s
+  epoch  7 | train_loss 0.0969 | val_loss 0.1344 | val top-1 0.9580 | val macro-F1 0.9445 * | 57s
+  epoch  8 | train_loss 0.0858 | val_loss 0.1217 | val top-1 0.9632 | val macro-F1 0.9502 * | 57s
+  epoch  9 | train_loss 0.0758 | val_loss 0.1146 | val top-1 0.9652 | val macro-F1 0.9530 * | 57s
+  epoch 10 | train_loss 0.0635 | val_loss 0.1250 | val top-1 0.9617 | val macro-F1 0.9481 | 57s
+  epoch 11 | train_loss 0.0638 | val_loss 0.1149 | val top-1 0.9646 | val macro-F1 0.9514 | 57s
+  epoch 12 | train_loss 0.0641 | val_loss 0.1150 | val top-1 0.9649 | val macro-F1 0.9515 | 57s
+[B02 seed0] xong: best epoch 9, val macro-F1 0.9530, top-1 0.9652
+[B03 seed0] deit_small_patch16_224.fb_in1k (deit_small_patch16_224.fb_in1k) | 21.7M params | 4.60 GMAC | device cuda
+/kaggle/working/K4-D02-NguyenVanQuocViet-2A202602973/submissions/2A202602973_NguyenVanQuocViet/code/train.py:204: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  scheduler.step()
+
+/kaggle/working/K4-D02-NguyenVanQuocViet-2A202602973/submissions/2A202602973_NguyenVanQuocViet/code/train.py:204: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  scheduler.step()
+  epoch  1 | train_loss 0.9081 | val_loss 0.3754 | val top-1 0.8797 | val macro-F1 0.8303 * | 41s
+  epoch  2 | train_loss 0.3536 | val_loss 0.2672 | val top-1 0.9092 | val macro-F1 0.8699 * | 39s
+  epoch  3 | train_loss 0.2554 | val_loss 0.3052 | val top-1 0.8995 | val macro-F1 0.8648 | 39s
+  epoch  4 | train_loss 0.2042 | val_loss 0.2055 | val top-1 0.9360 | val macro-F1 0.9177 * | 39s
+  epoch  5 | train_loss 0.1617 | val_loss 0.1637 | val top-1 0.9480 | val macro-F1 0.9287 * | 39s
+  epoch  6 | train_loss 0.1281 | val_loss 0.1469 | val top-1 0.9549 | val macro-F1 0.9385 * | 39s
+  epoch  7 | train_loss 0.1051 | val_loss 0.1477 | val top-1 0.9546 | val macro-F1 0.9358 | 39s
+  epoch  8 | train_loss 0.0807 | val_loss 0.1332 | val top-1 0.9574 | val macro-F1 0.9403 * | 39s
+  epoch  9 | train_loss 0.0707 | val_loss 0.1422 | val top-1 0.9586 | val macro-F1 0.9437 * | 39s
+  epoch 10 | train_loss 0.0535 | val_loss 0.1618 | val top-1 0.9514 | val macro-F1 0.9359 | 38s
+  epoch 11 | train_loss 0.0546 | val_loss 0.1418 | val top-1 0.9557 | val macro-F1 0.9399 | 38s
+  epoch 12 | train_loss 0.0468 | val_loss 0.1417 | val top-1 0.9569 | val macro-F1 0.9414 | 39s
+[B03 seed0] xong: best epoch 9, val macro-F1 0.9437, top-1 0.9586
+[B04 seed0] efficientnet_b0.ra_in1k (efficientnet_b0.ra_in1k) | 4.0M params | 0.38 GMAC | device cuda
+  epoch  1 | train_loss 2.1355 | val_loss 1.4155 | val top-1 0.5478 | val macro-F1 0.4046 * | 79s
+  epoch  2 | train_loss 0.8153 | val_loss 1.0073 | val top-1 0.6758 | val macro-F1 0.5696 * | 27s
+  epoch  3 | train_loss 0.5695 | val_loss 0.8464 | val top-1 0.7241 | val macro-F1 0.6256 * | 28s
+  epoch  4 | train_loss 0.4320 | val_loss 0.7129 | val top-1 0.7695 | val macro-F1 0.6850 * | 27s
+  epoch  5 | train_loss 0.3621 | val_loss 0.6547 | val top-1 0.7926 | val macro-F1 0.7143 * | 27s
+  epoch  6 | train_loss 0.3199 | val_loss 0.5962 | val top-1 0.8055 | val macro-F1 0.7381 * | 28s
+  epoch  7 | train_loss 0.2870 | val_loss 0.5836 | val top-1 0.8138 | val macro-F1 0.7500 * | 28s
+  epoch  8 | train_loss 0.2554 | val_loss 0.5846 | val top-1 0.8112 | val macro-F1 0.7411 | 28s
+  epoch  9 | train_loss 0.2363 | val_loss 0.5571 | val top-1 0.8198 | val macro-F1 0.7549 * | 27s
+  epoch 10 | train_loss 0.2253 | val_loss 0.5423 | val top-1 0.8289 | val macro-F1 0.7683 * | 28s
+  epoch 11 | train_loss 0.2234 | val_loss 0.5538 | val top-1 0.8232 | val macro-F1 0.7626 | 28s
+  epoch 12 | train_loss 0.2225 | val_loss 0.5292 | val top-1 0.8289 | val macro-F1 0.7698 * | 28s
+[B04 seed0] xong: best epoch 12, val macro-F1 0.7698, top-1 0.8289
+[B05 seed0] mobilenetv3_large_100.ra_in1k (mobilenetv3_large_100.ra_in1k) | 4.2M params | 0.22 GMAC | device cuda
+  epoch  1 | train_loss 1.8477 | val_loss 1.5040 | val top-1 0.5124 | val macro-F1 0.3534 * | 54s
+  epoch  2 | train_loss 0.7893 | val_loss 1.1027 | val top-1 0.6395 | val macro-F1 0.4977 * | 16s
+  epoch  3 | train_loss 0.5483 | val_loss 1.0101 | val top-1 0.6681 | val macro-F1 0.5326 * | 16s
+  epoch  4 | train_loss 0.4240 | val_loss 0.8208 | val top-1 0.7424 | val macro-F1 0.6374 * | 16s
+  epoch  5 | train_loss 0.3610 | val_loss 0.8241 | val top-1 0.7315 | val macro-F1 0.6157 | 17s
+  epoch  6 | train_loss 0.3179 | val_loss 0.7366 | val top-1 0.7506 | val macro-F1 0.6520 * | 16s
+  epoch  7 | train_loss 0.2841 | val_loss 0.7133 | val top-1 0.7618 | val macro-F1 0.6660 * | 16s
+  epoch  8 | train_loss 0.2620 | val_loss 0.6895 | val top-1 0.7735 | val macro-F1 0.6861 * | 16s
+  epoch  9 | train_loss 0.2409 | val_loss 0.6950 | val top-1 0.7724 | val macro-F1 0.6834 | 16s
+  epoch 10 | train_loss 0.2261 | val_loss 0.6772 | val top-1 0.7786 | val macro-F1 0.6906 * | 16s
+  epoch 11 | train_loss 0.2192 | val_loss 0.7020 | val top-1 0.7681 | val macro-F1 0.6763 | 16s
+  epoch 12 | train_loss 0.2273 | val_loss 0.6739 | val top-1 0.7752 | val macro-F1 0.6877 | 16s
+[B05 seed0] xong: best epoch 10, val macro-F1 0.6906, top-1 0.7786
+Tương quan thứ hạng (5 điểm, tham khảo): {'spearman(GMAC, latency_b1_p50_ms)': -0.4, 'spearman(GMAC, train_time_per_epoch_s)': 0.9, 'spearman(params, latency_b1_p50_ms)': -0.2}
+Backbone đi tiếp: convnext_tiny.fb_in1k 
+ macro-F1 val cao nhất: convnext_tiny.fb_in1k 0.9530. Các backbone trong khoảng 0.005 (1 seed, không phân biệt được): convnext_tiny.fb_in1k. Chọn convnext_tiny.fb_in1k (macro-F1 0.9530, p50 batch-1 6.3 ms, 27.8M tham số) vì nhanh nhất trong nhóm đó.
+Đã chép 5 ảnh vào K4-D02-NguyenVanQuocViet-2A202602973/submissions/2A202602973_NguyenVanQuocViet/curves
+[T00 seed0] dùng lại B02 seed0 (cùng công thức và seed)
+[T00 seed1] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.2057 | val_loss 0.5076 | val top-1 0.8489 | val macro-F1 0.7862 * | 58s
+  epoch  2 | train_loss 0.3833 | val_loss 0.2709 | val top-1 0.9097 | val macro-F1 0.8844 * | 57s
+  epoch  3 | train_loss 0.2361 | val_loss 0.1768 | val top-1 0.9457 | val macro-F1 0.9301 * | 57s
+  epoch  4 | train_loss 0.1748 | val_loss 0.1579 | val top-1 0.9497 | val macro-F1 0.9369 * | 57s
+  epoch  5 | train_loss 0.1325 | val_loss 0.1593 | val top-1 0.9477 | val macro-F1 0.9298 | 57s
+  epoch  6 | train_loss 0.1212 | val_loss 0.1665 | val top-1 0.9486 | val macro-F1 0.9316 | 57s
+  epoch  7 | train_loss 0.1010 | val_loss 0.1437 | val top-1 0.9572 | val macro-F1 0.9434 * | 57s
+  epoch  8 | train_loss 0.0889 | val_loss 0.1293 | val top-1 0.9592 | val macro-F1 0.9463 * | 57s
+  epoch  9 | train_loss 0.0733 | val_loss 0.1190 | val top-1 0.9620 | val macro-F1 0.9493 * | 57s
+  epoch 10 | train_loss 0.0648 | val_loss 0.1280 | val top-1 0.9592 | val macro-F1 0.9459 | 57s
+  epoch 11 | train_loss 0.0594 | val_loss 0.1218 | val top-1 0.9612 | val macro-F1 0.9491 | 57s
+  epoch 12 | train_loss 0.0623 | val_loss 0.1196 | val top-1 0.9614 | val macro-F1 0.9496 * | 57s
+[T00 seed1] xong: best epoch 12, val macro-F1 0.9496, top-1 0.9614
+[T00 seed2] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.2230 | val_loss 0.4832 | val top-1 0.8463 | val macro-F1 0.7974 * | 57s
+  epoch  2 | train_loss 0.3733 | val_loss 0.2365 | val top-1 0.9294 | val macro-F1 0.9046 * | 57s
+  epoch  3 | train_loss 0.2438 | val_loss 0.2044 | val top-1 0.9377 | val macro-F1 0.9180 * | 57s
+  epoch  4 | train_loss 0.1729 | val_loss 0.1670 | val top-1 0.9503 | val macro-F1 0.9373 * | 57s
+  epoch  5 | train_loss 0.1603 | val_loss 0.1503 | val top-1 0.9532 | val macro-F1 0.9385 * | 57s
+  epoch  6 | train_loss 0.1287 | val_loss 0.1332 | val top-1 0.9603 | val macro-F1 0.9473 * | 57s
+  epoch  7 | train_loss 0.1083 | val_loss 0.1249 | val top-1 0.9640 | val macro-F1 0.9517 * | 57s
+  epoch  8 | train_loss 0.0856 | val_loss 0.1186 | val top-1 0.9660 | val macro-F1 0.9554 * | 57s
+  epoch  9 | train_loss 0.0784 | val_loss 0.1229 | val top-1 0.9637 | val macro-F1 0.9526 | 57s
+  epoch 10 | train_loss 0.0688 | val_loss 0.1255 | val top-1 0.9634 | val macro-F1 0.9498 | 57s
+  epoch 11 | train_loss 0.0669 | val_loss 0.1208 | val top-1 0.9634 | val macro-F1 0.9511 | 57s
+  epoch 12 | train_loss 0.0619 | val_loss 0.1204 | val top-1 0.9634 | val macro-F1 0.9513 | 57s
+[T00 seed2] xong: best epoch 8, val macro-F1 0.9554, top-1 0.9660
+Nhiễu T00: macro-F1 val [0.953, 0.9496, 0.9554] -> std 0.0030, ngưỡng 0.0030
+[T01 seed0] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.6048 | val_loss 1.1565 | val top-1 0.5898 | val macro-F1 0.3144 * | 20s
+  epoch  2 | train_loss 0.9729 | val_loss 0.9210 | val top-1 0.6789 | val macro-F1 0.5300 * | 20s
+  epoch  3 | train_loss 0.8180 | val_loss 0.8464 | val top-1 0.7107 | val macro-F1 0.5978 * | 20s
+  epoch  4 | train_loss 0.7494 | val_loss 0.7798 | val top-1 0.7301 | val macro-F1 0.6335 * | 20s
+  epoch  5 | train_loss 0.6973 | val_loss 0.7508 | val top-1 0.7401 | val macro-F1 0.6457 * | 20s
+  epoch  6 | train_loss 0.6775 | val_loss 0.7192 | val top-1 0.7515 | val macro-F1 0.6671 * | 20s
+  epoch  7 | train_loss 0.6502 | val_loss 0.7083 | val top-1 0.7552 | val macro-F1 0.6686 * | 20s
+  epoch  8 | train_loss 0.6344 | val_loss 0.6991 | val top-1 0.7621 | val macro-F1 0.6810 * | 20s
+  epoch  9 | train_loss 0.6278 | val_loss 0.6938 | val top-1 0.7626 | val macro-F1 0.6797 | 20s
+  epoch 10 | train_loss 0.6196 | val_loss 0.6902 | val top-1 0.7646 | val macro-F1 0.6845 * | 20s
+  epoch 11 | train_loss 0.6159 | val_loss 0.6894 | val top-1 0.7652 | val macro-F1 0.6847 * | 20s
+  epoch 12 | train_loss 0.6174 | val_loss 0.6891 | val top-1 0.7655 | val macro-F1 0.6848 * | 20s
+[T01 seed0] xong: best epoch 12, val macro-F1 0.6848, top-1 0.7655
+[T02 seed0] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.2972 | val_loss 0.5165 | val top-1 0.8309 | val macro-F1 0.7705 * | 58s
+  epoch  2 | train_loss 0.4839 | val_loss 0.3373 | val top-1 0.8869 | val macro-F1 0.8418 * | 57s
+  epoch  3 | train_loss 0.3293 | val_loss 0.2445 | val top-1 0.9200 | val macro-F1 0.8954 * | 57s
+  epoch  4 | train_loss 0.2499 | val_loss 0.1875 | val top-1 0.9437 | val macro-F1 0.9258 * | 57s
+  epoch  5 | train_loss 0.2218 | val_loss 0.1451 | val top-1 0.9554 | val macro-F1 0.9422 * | 57s
+  epoch  6 | train_loss 0.1841 | val_loss 0.1575 | val top-1 0.9500 | val macro-F1 0.9356 | 57s
+  epoch  7 | train_loss 0.1626 | val_loss 0.1397 | val top-1 0.9560 | val macro-F1 0.9419 | 57s
+  epoch  8 | train_loss 0.1422 | val_loss 0.1162 | val top-1 0.9660 | val macro-F1 0.9549 * | 57s
+  epoch  9 | train_loss 0.1280 | val_loss 0.1115 | val top-1 0.9620 | val macro-F1 0.9506 | 57s
+  epoch 10 | train_loss 0.1164 | val_loss 0.1110 | val top-1 0.9634 | val macro-F1 0.9508 | 57s
+  epoch 11 | train_loss 0.1154 | val_loss 0.1105 | val top-1 0.9646 | val macro-F1 0.9525 | 57s
+  epoch 12 | train_loss 0.1101 | val_loss 0.1075 | val top-1 0.9663 | val macro-F1 0.9547 | 57s
+[T02 seed0] xong: best epoch 8, val macro-F1 0.9549, top-1 0.9660
+[T03 seed0] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.2421 | val_loss 0.5065 | val top-1 0.8340 | val macro-F1 0.7780 * | 57s
+  epoch  2 | train_loss 0.4146 | val_loss 0.3265 | val top-1 0.8952 | val macro-F1 0.8634 * | 57s
+  epoch  3 | train_loss 0.2692 | val_loss 0.2336 | val top-1 0.9235 | val macro-F1 0.9022 * | 57s
+  epoch  4 | train_loss 0.1952 | val_loss 0.2174 | val top-1 0.9332 | val macro-F1 0.9082 * | 57s
+  epoch  5 | train_loss 0.1639 | val_loss 0.1867 | val top-1 0.9392 | val macro-F1 0.9248 * | 57s
+  epoch  6 | train_loss 0.1410 | val_loss 0.1747 | val top-1 0.9409 | val macro-F1 0.9227 | 57s
+  epoch  7 | train_loss 0.1297 | val_loss 0.1356 | val top-1 0.9592 | val macro-F1 0.9469 * | 57s
+  epoch  8 | train_loss 0.1024 | val_loss 0.1293 | val top-1 0.9592 | val macro-F1 0.9472 * | 57s
+  epoch  9 | train_loss 0.0923 | val_loss 0.1174 | val top-1 0.9654 | val macro-F1 0.9542 * | 57s
+  epoch 10 | train_loss 0.0841 | val_loss 0.1256 | val top-1 0.9603 | val macro-F1 0.9470 | 57s
+  epoch 11 | train_loss 0.0826 | val_loss 0.1262 | val top-1 0.9592 | val macro-F1 0.9462 | 57s
+  epoch 12 | train_loss 0.0794 | val_loss 0.1240 | val top-1 0.9600 | val macro-F1 0.9466 | 57s
+[T03 seed0] xong: best epoch 9, val macro-F1 0.9542, top-1 0.9654
+[T04 seed0] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.4796 | val_loss 0.7208 | val top-1 0.7798 | val macro-F1 0.7246 * | 58s
+  epoch  2 | train_loss 0.9270 | val_loss 0.3657 | val top-1 0.8997 | val macro-F1 0.8649 * | 57s
+  epoch  3 | train_loss 0.7721 | val_loss 0.3435 | val top-1 0.9023 | val macro-F1 0.8755 * | 57s
+  epoch  4 | train_loss 0.7145 | val_loss 0.2141 | val top-1 0.9417 | val macro-F1 0.9222 * | 57s
+  epoch  5 | train_loss 0.6842 | val_loss 0.1876 | val top-1 0.9503 | val macro-F1 0.9367 * | 57s
+  epoch  6 | train_loss 0.6500 | val_loss 0.1853 | val top-1 0.9509 | val macro-F1 0.9382 * | 57s
+  epoch  7 | train_loss 0.6163 | val_loss 0.1603 | val top-1 0.9569 | val macro-F1 0.9437 * | 57s
+  epoch  8 | train_loss 0.6098 | val_loss 0.1511 | val top-1 0.9600 | val macro-F1 0.9488 * | 57s
+  epoch  9 | train_loss 0.5987 | val_loss 0.1475 | val top-1 0.9612 | val macro-F1 0.9502 * | 57s
+  epoch 10 | train_loss 0.5719 | val_loss 0.1438 | val top-1 0.9603 | val macro-F1 0.9485 | 57s
+  epoch 11 | train_loss 0.5801 | val_loss 0.1457 | val top-1 0.9609 | val macro-F1 0.9495 | 57s
+  epoch 12 | train_loss 0.5811 | val_loss 0.1425 | val top-1 0.9620 | val macro-F1 0.9514 * | 57s
+[T04 seed0] xong: best epoch 12, val macro-F1 0.9514, top-1 0.9620
+[T05 seed0] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.4146 | val_loss 0.5782 | val top-1 0.8320 | val macro-F1 0.7749 * | 58s
+  epoch  2 | train_loss 0.7824 | val_loss 0.3410 | val top-1 0.9252 | val macro-F1 0.8990 * | 57s
+  epoch  3 | train_loss 0.6722 | val_loss 0.3251 | val top-1 0.9309 | val macro-F1 0.9087 * | 57s
+  epoch  4 | train_loss 0.6306 | val_loss 0.2683 | val top-1 0.9406 | val macro-F1 0.9222 * | 57s
+  epoch  5 | train_loss 0.6047 | val_loss 0.2359 | val top-1 0.9480 | val macro-F1 0.9325 * | 57s
+  epoch  6 | train_loss 0.5824 | val_loss 0.2329 | val top-1 0.9586 | val macro-F1 0.9455 * | 57s
+  epoch  7 | train_loss 0.5664 | val_loss 0.2252 | val top-1 0.9523 | val macro-F1 0.9377 | 57s
+  epoch  8 | train_loss 0.5562 | val_loss 0.2165 | val top-1 0.9643 | val macro-F1 0.9529 * | 57s
+  epoch  9 | train_loss 0.5513 | val_loss 0.2083 | val top-1 0.9660 | val macro-F1 0.9552 * | 57s
+  epoch 10 | train_loss 0.5406 | val_loss 0.2075 | val top-1 0.9606 | val macro-F1 0.9475 | 57s
+  epoch 11 | train_loss 0.5418 | val_loss 0.2018 | val top-1 0.9626 | val macro-F1 0.9499 | 57s
+  epoch 12 | train_loss 0.5409 | val_loss 0.2026 | val top-1 0.9626 | val macro-F1 0.9497 | 57s
+[T05 seed0] xong: best epoch 9, val macro-F1 0.9552, top-1 0.9660
+[T06 seed0] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 0.8191 | val_loss 0.7310 | val top-1 0.7983 | val macro-F1 0.7502 * | 58s
+  epoch  2 | train_loss 0.2008 | val_loss 0.3891 | val top-1 0.9060 | val macro-F1 0.8757 * | 57s
+  epoch  3 | train_loss 0.1191 | val_loss 0.3996 | val top-1 0.9003 | val macro-F1 0.8772 * | 57s
+  epoch  4 | train_loss 0.0916 | val_loss 0.2457 | val top-1 0.9457 | val macro-F1 0.9294 * | 57s
+  epoch  5 | train_loss 0.0725 | val_loss 0.2264 | val top-1 0.9423 | val macro-F1 0.9238 | 57s
+  epoch  6 | train_loss 0.0558 | val_loss 0.2105 | val top-1 0.9523 | val macro-F1 0.9387 * | 57s
+  epoch  7 | train_loss 0.0452 | val_loss 0.1787 | val top-1 0.9497 | val macro-F1 0.9367 | 57s
+  epoch  8 | train_loss 0.0405 | val_loss 0.1973 | val top-1 0.9560 | val macro-F1 0.9414 * | 57s
+  epoch  9 | train_loss 0.0351 | val_loss 0.1730 | val top-1 0.9640 | val macro-F1 0.9530 * | 57s
+  epoch 10 | train_loss 0.0288 | val_loss 0.1755 | val top-1 0.9592 | val macro-F1 0.9453 | 57s
+  epoch 11 | train_loss 0.0292 | val_loss 0.1666 | val top-1 0.9614 | val macro-F1 0.9481 | 56s
+  epoch 12 | train_loss 0.0295 | val_loss 0.1673 | val top-1 0.9609 | val macro-F1 0.9476 | 56s
+[T06 seed0] xong: best epoch 9, val macro-F1 0.9530, top-1 0.9640
+[T07 seed0] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.3473 | val_loss 0.7422 | val top-1 0.7572 | val macro-F1 0.7456 * | 58s
+  epoch  2 | train_loss 0.4339 | val_loss 0.4825 | val top-1 0.8340 | val macro-F1 0.8178 * | 57s
+  epoch  3 | train_loss 0.2686 | val_loss 0.5767 | val top-1 0.7998 | val macro-F1 0.7981 | 57s
+  epoch  4 | train_loss 0.2148 | val_loss 0.2109 | val top-1 0.9354 | val macro-F1 0.9196 * | 57s
+  epoch  5 | train_loss 0.1684 | val_loss 0.1747 | val top-1 0.9457 | val macro-F1 0.9314 * | 57s
+  epoch  6 | train_loss 0.1345 | val_loss 0.2339 | val top-1 0.9192 | val macro-F1 0.9046 | 57s
+  epoch  7 | train_loss 0.1154 | val_loss 0.1643 | val top-1 0.9486 | val macro-F1 0.9354 * | 57s
+  epoch  8 | train_loss 0.1012 | val_loss 0.2176 | val top-1 0.9240 | val macro-F1 0.9107 | 57s
+  epoch  9 | train_loss 0.0916 | val_loss 0.1795 | val top-1 0.9426 | val macro-F1 0.9307 | 57s
+  epoch 10 | train_loss 0.0753 | val_loss 0.1533 | val top-1 0.9514 | val macro-F1 0.9378 * | 57s
+  epoch 11 | train_loss 0.0755 | val_loss 0.1555 | val top-1 0.9523 | val macro-F1 0.9375 | 57s
+  epoch 12 | train_loss 0.0776 | val_loss 0.1537 | val top-1 0.9523 | val macro-F1 0.9377 | 57s
+[T07 seed0] xong: best epoch 10, val macro-F1 0.9378, top-1 0.9514
+[T08 seed0] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.2320 | val_loss 1.4915 | val top-1 0.6053 | val macro-F1 0.3362 * | 58s
+  epoch  2 | train_loss 0.3887 | val_loss 0.5736 | val top-1 0.8329 | val macro-F1 0.7739 * | 57s
+  epoch  3 | train_loss 0.2396 | val_loss 0.2735 | val top-1 0.9200 | val macro-F1 0.8937 * | 57s
+  epoch  4 | train_loss 0.1836 | val_loss 0.1820 | val top-1 0.9483 | val macro-F1 0.9307 * | 57s
+  epoch  5 | train_loss 0.1525 | val_loss 0.1488 | val top-1 0.9574 | val macro-F1 0.9432 * | 57s
+  epoch  6 | train_loss 0.1191 | val_loss 0.1288 | val top-1 0.9637 | val macro-F1 0.9510 * | 57s
+  epoch  7 | train_loss 0.0969 | val_loss 0.1183 | val top-1 0.9657 | val macro-F1 0.9543 * | 57s
+  epoch  8 | train_loss 0.0858 | val_loss 0.1140 | val top-1 0.9674 | val macro-F1 0.9557 * | 57s
+  epoch  9 | train_loss 0.0758 | val_loss 0.1149 | val top-1 0.9680 | val macro-F1 0.9564 * | 57s
+  epoch 10 | train_loss 0.0635 | val_loss 0.1160 | val top-1 0.9672 | val macro-F1 0.9545 | 57s
+  epoch 11 | train_loss 0.0638 | val_loss 0.1162 | val top-1 0.9652 | val macro-F1 0.9517 | 57s
+  epoch 12 | train_loss 0.0641 | val_loss 0.1153 | val top-1 0.9649 | val macro-F1 0.9514 | 57s
+[T08 seed0] xong: best epoch 9, val macro-F1 0.9564, top-1 0.9680
+[T09 seed0] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.2586 | val_loss 0.6568 | val top-1 0.7792 | val macro-F1 0.7691 * | 58s
+  epoch  2 | train_loss 0.3360 | val_loss 0.4756 | val top-1 0.8372 | val macro-F1 0.8358 * | 57s
+  epoch  3 | train_loss 0.2253 | val_loss 0.3157 | val top-1 0.8975 | val macro-F1 0.8832 * | 57s
+  epoch  4 | train_loss 0.1679 | val_loss 0.2916 | val top-1 0.9069 | val macro-F1 0.8939 * | 57s
+  epoch  5 | train_loss 0.1464 | val_loss 0.2659 | val top-1 0.9186 | val macro-F1 0.9086 * | 57s
+  epoch  6 | train_loss 0.1134 | val_loss 0.1822 | val top-1 0.9417 | val macro-F1 0.9280 * | 57s
+  epoch  7 | train_loss 0.1005 | val_loss 0.1670 | val top-1 0.9500 | val macro-F1 0.9394 * | 57s
+  epoch  8 | train_loss 0.0777 | val_loss 0.1698 | val top-1 0.9497 | val macro-F1 0.9376 | 57s
+  epoch  9 | train_loss 0.0730 | val_loss 0.1618 | val top-1 0.9512 | val macro-F1 0.9402 * | 57s
+  epoch 10 | train_loss 0.0669 | val_loss 0.1850 | val top-1 0.9446 | val macro-F1 0.9342 | 57s
+  epoch 11 | train_loss 0.0629 | val_loss 0.1598 | val top-1 0.9523 | val macro-F1 0.9420 * | 57s
+  epoch 12 | train_loss 0.0606 | val_loss 0.1553 | val top-1 0.9543 | val macro-F1 0.9447 * | 57s
+[T09 seed0] xong: best epoch 12, val macro-F1 0.9447, top-1 0.9543
+Mọi T0x so với cùng T00 (không đổi nền giữa chừng). Quy tắc chọn: ít hơn 2 trục vượt nhiễu 0.0030 -> nới thành Δ > 0. Ghép T08 (EMA decay=0.995, Δ=+0.0034) + T05 (loss=label smoothing 0.1, Δ=+0.0022) + T02 (aug=trivial (TrivialAugmentWide), Δ=+0.0020) thành T10. {'ema_decay': 0.995, 'loss': 'ls', 'label_smoothing': 0.1, 'aug': 'trivial'}
+[T10 seed0] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.4645 | val_loss 1.5612 | val top-1 0.6033 | val macro-F1 0.3271 * | 58s
+  epoch  2 | train_loss 0.8534 | val_loss 0.7275 | val top-1 0.8320 | val macro-F1 0.7782 * | 57s
+  epoch  3 | train_loss 0.7422 | val_loss 0.4069 | val top-1 0.9126 | val macro-F1 0.8873 * | 57s
+  epoch  4 | train_loss 0.6840 | val_loss 0.2881 | val top-1 0.9397 | val macro-F1 0.9218 * | 58s
+  epoch  5 | train_loss 0.6615 | val_loss 0.2424 | val top-1 0.9497 | val macro-F1 0.9351 * | 58s
+  epoch  6 | train_loss 0.6338 | val_loss 0.2166 | val top-1 0.9580 | val macro-F1 0.9450 * | 57s
+  epoch  7 | train_loss 0.6173 | val_loss 0.2037 | val top-1 0.9640 | val macro-F1 0.9525 * | 57s
+  epoch  8 | train_loss 0.6014 | val_loss 0.1961 | val top-1 0.9666 | val macro-F1 0.9559 * | 58s
+  epoch  9 | train_loss 0.5939 | val_loss 0.1933 | val top-1 0.9663 | val macro-F1 0.9554 | 57s
+  epoch 10 | train_loss 0.5833 | val_loss 0.1902 | val top-1 0.9672 | val macro-F1 0.9566 * | 57s
+  epoch 11 | train_loss 0.5825 | val_loss 0.1902 | val top-1 0.9663 | val macro-F1 0.9554 | 57s
+  epoch 12 | train_loss 0.5784 | val_loss 0.1901 | val top-1 0.9669 | val macro-F1 0.9562 | 58s
+[T10 seed0] xong: best epoch 10, val macro-F1 0.9566, top-1 0.9672
+Công thức chung kết: T10 {'ema_decay': 0.995, 'loss': 'ls', 'label_smoothing': 0.1, 'aug': 'trivial'} 
+ T10 có macro-F1 val cao nhất 0.9566 (T00 seed 0 0.9530, Δ=+0.0037); so với ngưỡng nhiễu 0.0030: vượt nhiễu (tốt hơn). Lựa chọn dựa trên 1 seed; Bước 4 kiểm chứng bằng 3 seed.
+Đã chép 18 ảnh vào K4-D02-NguyenVanQuocViet-2A202602973/submissions/2A202602973_NguyenVanQuocViet/curves
+fuse_conv_bn: đã gộp 0 cặp Conv2d+BatchNorm2d (kiến trúc không có BatchNorm, vd dùng LayerNorm: không áp dụng)
+fuse_conv_bn: sai số lớn nhất trước/sau gộp = 0.00e+00
+I00: macro-F1 0.9566, p95 6.6 ms. Tốt nhất nhóm không tốn thêm: I06 (trọng số EMA, T08 epoch 9) 0.9567 (Δ +0.0001), p95 6.6 ms. Tốt nhất nhóm tốn thêm: I05_seeds (ensemble 3 seed của T00) 0.9632 (Δ +0.0066), p95 23.3 ms = x3.3 I00. 18/18 phương pháp có p95 ≤ 100 ms ở batch 1.
+Suy luận cho chung kết: I04_256 
+ I04_256 (độ phân giải kiểm tra 256) macro-F1 val 0.9654 > I00 0.9566 (Δ=+0.0088 ≥ 0.002); chi phí x1.1.
+[F01 seed0] dùng lại T10 seed0 (cùng công thức và seed)
+[F01 seed1] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.4361 | val_loss 1.4893 | val top-1 0.6241 | val macro-F1 0.3794 * | 59s
+  epoch  2 | train_loss 0.8497 | val_loss 0.7266 | val top-1 0.8369 | val macro-F1 0.7834 * | 58s
+  epoch  3 | train_loss 0.7421 | val_loss 0.4191 | val top-1 0.9026 | val macro-F1 0.8750 * | 57s
+  epoch  4 | train_loss 0.6931 | val_loss 0.2997 | val top-1 0.9374 | val macro-F1 0.9198 * | 58s
+  epoch  5 | train_loss 0.6539 | val_loss 0.2422 | val top-1 0.9517 | val macro-F1 0.9373 * | 58s
+  epoch  6 | train_loss 0.6339 | val_loss 0.2206 | val top-1 0.9552 | val macro-F1 0.9408 * | 58s
+  epoch  7 | train_loss 0.6220 | val_loss 0.2051 | val top-1 0.9603 | val macro-F1 0.9486 * | 58s
+  epoch  8 | train_loss 0.6056 | val_loss 0.1971 | val top-1 0.9643 | val macro-F1 0.9535 * | 57s
+  epoch  9 | train_loss 0.5937 | val_loss 0.1947 | val top-1 0.9646 | val macro-F1 0.9548 * | 58s
+  epoch 10 | train_loss 0.5832 | val_loss 0.1931 | val top-1 0.9643 | val macro-F1 0.9548 | 58s
+  epoch 11 | train_loss 0.5836 | val_loss 0.1912 | val top-1 0.9652 | val macro-F1 0.9557 * | 58s
+  epoch 12 | train_loss 0.5819 | val_loss 0.1902 | val top-1 0.9657 | val macro-F1 0.9558 * | 57s
+[F01 seed1] xong: best epoch 12, val macro-F1 0.9558, top-1 0.9657
+[F01 seed2] convnext_tiny.fb_in1k (convnext_tiny.fb_in1k) | 27.8M params | 4.45 GMAC | device cuda
+  epoch  1 | train_loss 1.4535 | val_loss 1.4868 | val top-1 0.5841 | val macro-F1 0.2759 * | 58s
+  epoch  2 | train_loss 0.8417 | val_loss 0.7427 | val top-1 0.8075 | val macro-F1 0.7368 * | 57s
+  epoch  3 | train_loss 0.7413 | val_loss 0.4163 | val top-1 0.9066 | val macro-F1 0.8820 * | 58s
+  epoch  4 | train_loss 0.6837 | val_loss 0.2949 | val top-1 0.9443 | val macro-F1 0.9285 * | 58s
+  epoch  5 | train_loss 0.6641 | val_loss 0.2459 | val top-1 0.9523 | val macro-F1 0.9385 * | 57s
+  epoch  6 | train_loss 0.6438 | val_loss 0.2237 | val top-1 0.9600 | val macro-F1 0.9489 * | 57s
+  epoch  7 | train_loss 0.6192 | val_loss 0.2141 | val top-1 0.9646 | val macro-F1 0.9546 * | 57s
+  epoch  8 | train_loss 0.6072 | val_loss 0.2086 | val top-1 0.9637 | val macro-F1 0.9532 | 57s
+  epoch  9 | train_loss 0.6010 | val_loss 0.2029 | val top-1 0.9663 | val macro-F1 0.9560 * | 58s
+  epoch 10 | train_loss 0.5897 | val_loss 0.2002 | val top-1 0.9677 | val macro-F1 0.9582 * | 57s
+  epoch 11 | train_loss 0.5841 | val_loss 0.1988 | val top-1 0.9692 | val macro-F1 0.9599 * | 58s
+  epoch 12 | train_loss 0.5831 | val_loss 0.1975 | val top-1 0.9686 | val macro-F1 0.9593 | 57s
+[F01 seed2] xong: best epoch 11, val macro-F1 0.9599, top-1 0.9692
+[F01 seed0] đã ghi dự đoán val/test (I04_256, T=0.599)
+[T00 seed0] đã ghi dự đoán val/test (I00, T=1.000)
+[F01 seed1] đã ghi dự đoán val/test (I04_256, T=0.604)
+[T00 seed1] đã ghi dự đoán val/test (I00, T=1.000)
+[F01 seed2] đã ghi dự đoán val/test (I04_256, T=0.601)
+[T00 seed2] đã ghi dự đoán val/test (I00, T=1.000)
+Cấu hình thời gian thực F01rt: p95 batch 1 = 8.8 ms (I08_amp)
+Đã chép 21 ảnh vào K4-D02-NguyenVanQuocViet-2A202602973/submissions/2A202602973_NguyenVanQuocViet/curves
+### F01 (3 seed: [0, 1, 2]; 3507 ảnh)
+
+| Chỉ số | mean ± std |
+|---|---|
+| top-1 accuracy | 0.9718 ± 0.0000 |
+| macro-F1 | 0.9632 ± 0.0006 |
+| balanced accuracy | 0.9598 ± 0.0010 |
+| ECE (15 bin) | 0.0057 ± 0.0001 |
+| NLL | 0.0961 ± 0.0033 |
+
+| Lớp | Precision | Recall | F1 | Số ảnh |
+|---|---|---|---|---|
+| Chinee apple | 0.952 ± 0.005 | 0.928 ± 0.009 | 0.939 ± 0.003 | 226 |
+| Lantana | 0.982 ± 0.003 | 0.948 ± 0.009 | 0.965 ± 0.004 | 213 |
+| Parkinsonia | 0.972 ± 0.009 | 0.987 ± 0.003 | 0.979 ± 0.005 | 207 |
+| Parthenium | 0.983 ± 0.003 | 0.954 ± 0.010 | 0.969 ± 0.004 | 205 |
+| Prickly acacia | 0.953 ± 0.009 | 0.956 ± 0.007 | 0.955 ± 0.001 | 213 |
+| Rubber vine | 0.959 ± 0.012 | 0.965 ± 0.005 | 0.962 ± 0.007 | 202 |
+| Siam weed | 0.986 ± 0.005 | 0.981 ± 0.000 | 0.984 ± 0.002 | 215 |
+| Snake weed | 0.936 ± 0.005 | 0.931 ± 0.000 | 0.934 ± 0.002 | 204 |
+| Negative | 0.978 ± 0.002 | 0.986 ± 0.001 | 0.982 ± 0.001 | 1822 |
+
+Đã lưu kết quả vào /kaggle/working/deepweeds_runs/eval_out/F01_*
+### T00 (3 seed: [0, 1, 2]; 3507 ảnh)
+
+| Chỉ số | mean ± std |
+|---|---|
+| top-1 accuracy | 0.9625 ± 0.0014 |
+| macro-F1 | 0.9522 ± 0.0026 |
+| balanced accuracy | 0.9517 ± 0.0042 |
+| ECE (15 bin) | 0.0082 ± 0.0022 |
+| NLL | 0.1178 ± 0.0024 |
+
+| Lớp | Precision | Recall | F1 | Số ảnh |
+|---|---|---|---|---|
+| Chinee apple | 0.950 ± 0.010 | 0.894 ± 0.018 | 0.921 ± 0.006 | 226 |
+| Lantana | 0.922 ± 0.026 | 0.977 ± 0.012 | 0.948 ± 0.008 | 213 |
+| Parkinsonia | 0.962 ± 0.005 | 0.987 ± 0.003 | 0.975 ± 0.003 | 207 |
+| Parthenium | 0.983 ± 0.010 | 0.941 ± 0.005 | 0.962 ± 0.005 | 205 |
+| Prickly acacia | 0.926 ± 0.004 | 0.942 ± 0.005 | 0.934 ± 0.004 | 213 |
+| Rubber vine | 0.964 ± 0.017 | 0.952 ± 0.012 | 0.958 ± 0.006 | 202 |
+| Siam weed | 0.968 ± 0.012 | 0.983 ± 0.003 | 0.975 ± 0.007 | 215 |
+| Snake weed | 0.932 ± 0.022 | 0.913 ± 0.016 | 0.922 ± 0.018 | 204 |
+| Negative | 0.974 ± 0.003 | 0.975 ± 0.005 | 0.975 ± 0.001 | 1822 |
+
+Đã lưu kết quả vào /kaggle/working/deepweeds_runs/eval_out/T00_*
+### F01rt (3 seed: [0, 1, 2]; 3507 ảnh)
+
+| Chỉ số | mean ± std |
+|---|---|
+| top-1 accuracy | 0.9627 ± 0.0037 |
+| macro-F1 | 0.9517 ± 0.0058 |
+| balanced accuracy | 0.9461 ± 0.0061 |
+| ECE (15 bin) | 0.0101 ± 0.0019 |
+| NLL | 0.1243 ± 0.0070 |
+
+| Lớp | Precision | Recall | F1 | Số ảnh |
+|---|---|---|---|---|
+| Chinee apple | 0.967 ± 0.014 | 0.888 ± 0.014 | 0.925 ± 0.006 | 226 |
+| Lantana | 0.941 ± 0.007 | 0.964 ± 0.022 | 0.952 ± 0.007 | 213 |
+| Parkinsonia | 0.959 ± 0.019 | 0.984 ± 0.003 | 0.971 ± 0.011 | 207 |
+| Parthenium | 0.983 ± 0.003 | 0.924 ± 0.012 | 0.952 ± 0.005 | 205 |
+| Prickly acacia | 0.929 ± 0.010 | 0.945 ± 0.005 | 0.937 ± 0.008 | 213 |
+| Rubber vine | 0.959 ± 0.011 | 0.955 ± 0.005 | 0.957 ± 0.003 | 202 |
+| Siam weed | 0.970 ± 0.013 | 0.981 ± 0.005 | 0.975 ± 0.005 | 215 |
+| Snake weed | 0.950 ± 0.020 | 0.891 ± 0.027 | 0.919 ± 0.020 | 204 |
+| Negative | 0.968 ± 0.002 | 0.983 ± 0.001 | 0.975 ± 0.001 | 1822 |
+
+Đã lưu kết quả vào /kaggle/working/deepweeds_runs/eval_out/F01rt_*
+### F01uncal (3 seed: [0, 1, 2]; 3507 ảnh)
+
+| Chỉ số | mean ± std |
+|---|---|
+| top-1 accuracy | 0.9718 ± 0.0000 |
+| macro-F1 | 0.9632 ± 0.0006 |
+| balanced accuracy | 0.9598 ± 0.0010 |
+| ECE (15 bin) | 0.0922 ± 0.0022 |
+| NLL | 0.1760 ± 0.0036 |
+
+| Lớp | Precision | Recall | F1 | Số ảnh |
+|---|---|---|---|---|
+| Chinee apple | 0.952 ± 0.005 | 0.928 ± 0.009 | 0.939 ± 0.003 | 226 |
+| Lantana | 0.982 ± 0.003 | 0.948 ± 0.009 | 0.965 ± 0.004 | 213 |
+| Parkinsonia | 0.972 ± 0.009 | 0.987 ± 0.003 | 0.979 ± 0.005 | 207 |
+| Parthenium | 0.983 ± 0.003 | 0.954 ± 0.010 | 0.969 ± 0.004 | 205 |
+| Prickly acacia | 0.953 ± 0.009 | 0.956 ± 0.007 | 0.955 ± 0.001 | 213 |
+| Rubber vine | 0.959 ± 0.012 | 0.965 ± 0.005 | 0.962 ± 0.007 | 202 |
+| Siam weed | 0.986 ± 0.005 | 0.981 ± 0.000 | 0.984 ± 0.002 | 215 |
+| Snake weed | 0.936 ± 0.005 | 0.931 ± 0.000 | 0.934 ± 0.002 | 204 |
+| Negative | 0.978 ± 0.002 | 0.986 ± 0.001 | 0.982 ± 0.001 | 1822 |
+
+Đã lưu kết quả vào /kaggle/working/deepweeds_runs/eval_out/F01uncal_*
+### F01_val (3 seed: [0, 1, 2]; 3501 ảnh)
+
+| Chỉ số | mean ± std |
+|---|---|
+| top-1 accuracy | 0.9733 ± 0.0002 |
+| macro-F1 | 0.9652 ± 0.0009 |
+| balanced accuracy | 0.9596 ± 0.0001 |
+| ECE (15 bin) | 0.0066 ± 0.0018 |
+| NLL | 0.0985 ± 0.0006 |
+
+| Lớp | Precision | Recall | F1 | Số ảnh |
+|---|---|---|---|---|
+| Chinee apple | 0.939 ± 0.011 | 0.927 ± 0.009 | 0.933 ± 0.002 | 225 |
+| Lantana | 0.978 ± 0.010 | 0.956 ± 0.005 | 0.967 ± 0.007 | 213 |
+| Parkinsonia | 0.981 ± 0.008 | 0.977 ± 0.003 | 0.979 ± 0.003 | 206 |
+| Parthenium | 0.992 ± 0.003 | 0.977 ± 0.003 | 0.984 ± 0.001 | 204 |
+| Prickly acacia | 0.959 ± 0.011 | 0.943 ± 0.008 | 0.951 ± 0.002 | 212 |
+| Rubber vine | 0.997 ± 0.003 | 0.977 ± 0.010 | 0.987 ± 0.004 | 202 |
+| Siam weed | 0.980 ± 0.010 | 0.974 ± 0.003 | 0.977 ± 0.005 | 215 |
+| Snake weed | 0.938 ± 0.010 | 0.915 ± 0.010 | 0.926 ± 0.005 | 203 |
+| Negative | 0.977 ± 0.002 | 0.990 ± 0.000 | 0.983 ± 0.001 | 1821 |
+
+Đã lưu kết quả vào /kaggle/working/deepweeds_runs/eval_out/F01_val_*
+### T00_val (3 seed: [0, 1, 2]; 3501 ảnh)
+
+| Chỉ số | mean ± std |
+|---|---|
+| top-1 accuracy | 0.9642 ± 0.0024 |
+| macro-F1 | 0.9527 ± 0.0030 |
+| balanced accuracy | 0.9508 ± 0.0015 |
+| ECE (15 bin) | 0.0091 ± 0.0007 |
+| NLL | 0.1176 ± 0.0026 |
+
+| Lớp | Precision | Recall | F1 | Số ảnh |
+|---|---|---|---|---|
+| Chinee apple | 0.941 ± 0.027 | 0.887 ± 0.019 | 0.913 ± 0.007 | 225 |
+| Lantana | 0.923 ± 0.033 | 0.969 ± 0.011 | 0.945 ± 0.013 | 213 |
+| Parkinsonia | 0.965 ± 0.003 | 0.974 ± 0.012 | 0.969 ± 0.006 | 206 |
+| Parthenium | 0.990 ± 0.013 | 0.951 ± 0.031 | 0.970 ± 0.014 | 204 |
+| Prickly acacia | 0.942 ± 0.013 | 0.947 ± 0.007 | 0.944 ± 0.007 | 212 |
+| Rubber vine | 0.993 ± 0.006 | 0.969 ± 0.008 | 0.981 ± 0.002 | 202 |
+| Siam weed | 0.959 ± 0.009 | 0.975 ± 0.007 | 0.967 ± 0.008 | 215 |
+| Snake weed | 0.908 ± 0.012 | 0.905 ± 0.021 | 0.906 ± 0.006 | 203 |
+| Negative | 0.976 ± 0.002 | 0.980 ± 0.004 | 0.978 ± 0.002 | 1821 |
+
+Đã lưu kết quả vào /kaggle/working/deepweeds_runs/eval_out/T00_val_*
+## Tự chấm RUBRIC mục I (đề xuất; giảng viên xác nhận)
+
+| Mã | Tiêu chí | Điểm | Tối đa | Chi tiết |
+|---|---|---|---|---|
+| I1 | Top-1 accuracy test | 7 | 7 | 97.18% (mean 3 seed) |
+| I2 | Macro-F1 cải thiện so với mốc | 5 | 5 | final 0.9632, mốc 0.9522, Δ=+0.0109, s=0.0026 |
+| I3 | Recall hai lớp khó | 4 | 4 | Chinee Apple 92.8% (mốc 88.5%), Snake Weed 93.1% (mốc 88.8%) |
+| I4a | ECE sau TS < ECE trước | 1 | 1 | trước 0.0922, sau 0.0057 |
+| I4b | Chênh macro-F1 val/test <= 0.02 | 1 | 1 | val 0.9652, test 0.9632, chênh 0.0020 |
+| I5 | Cấu hình thời gian thực | 2 | 2 | p95 = 8.8 ms (ngân sách 100 ms), đo đúng cách |
+
+**Tổng các ý đã chấm: 20 / 20** (phần I tối đa 20).
+
+Ngưỡng điểm là TẠM THỜI (xem khối hằng số đầu file eval.py và RUBRIC.md mục I).
+Đã chép 21 ảnh vào K4-D02-NguyenVanQuocViet-2A202602973/submissions/2A202602973_NguyenVanQuocViet/curves
+Khớp số Final/PerClass với eval.py: OK
+Ảnh curves thiếu: không
+{'python': '3.13.15', 'torch': '2.11.0+cu128', 'torchvision': '0.26.0+cu128', 'timm': '1.0.29', 'numpy': '2.1.3', 'pandas': '2.3.3', 'gpu': 'Tesla T4', 'cuda': '12.8'}
+Đã ghi bản nháp K4-D02-NguyenVanQuocViet-2A202602973/submissions/2A202602973_NguyenVanQuocViet/report.md
+K4-D02-NguyenVanQuocViet-2A202602973/submissions/2A202602973_NguyenVanQuocViet:
+total 84
+drwxr-xr-x 6 root root  4096 Oct  4 12:43 .
+drwxr-xr-x 3 root root  4096 Oct  4 08:38 ..
+drwxr-xr-x 3 root root  4096 Oct  4 08:40 code
+drwxr-xr-x 2 root root  4096 Oct  4 12:43 curves
+drwxr-xr-x 2 root root  4096 Oct  4 12:43 figures
+drwxr-xr-x 2 root root  4096 Oct  4 12:43 predictions
+-rw-r--r-- 1 root root  2173 Oct  4 08:38 README.md
+-rw-r--r-- 1 root root 25604 Oct  4 12:43 report.md
+-rw-r--r-- 1 root root 24773 Oct  4 12:43 results.xlsx
+
+K4-D02-NguyenVanQuocViet-2A202602973/submissions/2A202602973_NguyenVanQuocViet/figures:
+total 7088
+drwxr-xr-x 2 root root    4096 Oct  4 12:43 .
+drwxr-xr-x 6 root root    4096 Oct  4 12:43 ..
+-rw-r--r-- 1 root root  122071 Oct  4 09:25 backbones_curves.png
+-rw-r--r-- 1 root root   82322 Oct  4 09:25 backbones.png
+-rw-r--r-- 1 root root   73290 Oct  4 12:43 confusion_F01.png
+-rw-r--r-- 1 root root   74701 Oct  4 12:43 confusion_T00.png
+-rw-r--r-- 1 root root   51469 Oct  4 08:40 eda_class_distribution.png
+-rw-r--r-- 1 root root 3880507 Oct  4 08:40 eda_samples.png
+-rw-r--r-- 1 root root 1279616 Oct  4 12:43 errors_chinee_snake.png
+-rw-r--r-- 1 root root 1607276 Oct  4 12:43 errors_top_pair.png
+-rw-r--r-- 1 root root   61204 Oct  4 12:14 tradeoff.png
+
+K4-D02-NguyenVanQuocViet-2A202602973/submissions/2A202602973_NguyenVanQuocViet/predictions:
+total 8924
+drwxr-xr-x 2 root root   4096 Oct  4 12:43 .
+drwxr-xr-x 6 root root   4096 Oct  4 12:43 ..
+-rw-r--r-- 1 root root 508434 Oct  4 12:41 F01rt_seed0_test.csv
+-rw-r--r-- 1 root root 509380 Oct  4 12:42 F01rt_seed1_test.csv
+-rw-r--r-- 1 root root 508991 Oct  4 12:42 F01rt_seed2_test.csv
+-rw-r--r-- 1 root root 510607 Oct  4 12:41 F01_seed0_test.csv
+-rw-r--r-- 1 root root 509898 Oct  4 12:40 F01_seed0_val.csv
+-rw-r--r-- 1 root root 510795 Oct  4 12:42 F01_seed1_test.csv
+-rw-r--r-- 1 root root 509769 Oct  4 12:41 F01_seed1_val.csv
+-rw-r--r-- 1 root root 511003 Oct  4 12:42 F01_seed2_test.csv
+-rw-r--r-- 1 root root 509877 Oct  4 12:42 F01_seed2_val.csv
+-rw-r--r-- 1 root root 473107 Oct  4 12:41 F01uncal_seed0_test.csv
+-rw-r--r-- 1 root root 474082 Oct  4 12:42 F01uncal_seed1_test.csv
+-rw-r--r-- 1 root root 473475 Oct  4 12:42 F01uncal_seed2_test.csv
+-rw-r--r-- 1 root root      0 Oct  4 08:38 .gitkeep
+-rw-r--r-- 1 root root 513374 Oct  4 12:41 T00_seed0_test.csv
+-rw-r--r-- 1 root root 512417 Oct  4 12:41 T00_seed0_val.csv
+-rw-r--r-- 1 root root 514204 Oct  4 12:42 T00_seed1_test.csv
+-rw-r--r-- 1 root root 513112 Oct  4 12:42 T00_seed1_val.csv
+-rw-r--r-- 1 root root 513721 Oct  4 12:43 T00_seed2_test.csv
+-rw-r--r-- 1 root root 512703 Oct  4 12:43 T00_seed2_val.csv
+/usr/local/lib/python3.13/dist-packages/mistune.py:435: SyntaxWarning: invalid escape sequence '\|'
+  cells[i][c] = re.sub('\\\\\|', '|', cell)
+/usr/local/lib/python3.13/dist-packages/nbconvert/filters/filter_links.py:36: SyntaxWarning: invalid escape sequence '\_'
+  text = re.sub(r'_', '\_', text) # Escape underscores in display text
+[NbConvertApp] Converting notebook __notebook__.ipynb to notebook
+[NbConvertApp] Writing 6391405 bytes to __notebook__.ipynb
+[NbConvertApp] Converting notebook __notebook__.ipynb to html
+[NbConvertApp] Support files will be in __results___files/
+[NbConvertApp] Making directory __results___files
+[NbConvertApp] Making directory __results___files
+[NbConvertApp] Making directory __results___files
+[NbConvertApp] Writing 573552 bytes to __results__.html

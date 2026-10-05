@@ -35,6 +35,11 @@ NOISE_FLOOR = 0.003       # sàn ngưỡng nhiễu ở Bước 2 (slide trang 59
 NOISE_SEEDS = (0, 1, 2)   # seed của T00 dùng để đo nhiễu (cũng là mốc T00 ở Bước 4)
 RARE = {"Chinee Apple": 0, "Snake Weed": 7}
 
+
+def _is_rare(names: pd.Series) -> pd.Series:
+    """Tên lớp có thể là "Chinee Apple" (dataset.py) hoặc "Chinee apple" (labels.csv/eval.py): so không phân biệt hoa thường."""
+    return names.astype(str).str.lower().isin([k.lower() for k in RARE])
+
 # Ghim tag trọng số (timm "kiến_trúc.tag"): tag mặc định đổi theo phiên bản timm, và mặc định của convnext_tiny
 # là in12k_ft_in1k (tiền huấn luyện ImageNet-12k) -> không công bằng. Tất cả dưới đây chỉ dùng ImageNet-1k.
 BACKBONES = [
@@ -875,11 +880,11 @@ def per_class_table(eval_out: str | Path, tags=("F01", "T00", "F01rt")) -> pd.Da
 
 def hard_class_table(pc_df: pd.DataFrame) -> pd.DataFrame:
     """Precision/recall/F1 (mean ± std qua seed) của Chinee Apple và Snake Weed, lấy từ output eval.py."""
-    d = pc_df[pc_df["class"].isin(RARE.keys())].copy()
+    d = pc_df[_is_rare(pc_df["class"])].copy()
     for k in ("precision", "recall", "f1"):
         d[k] = [f"{m:.4f} ± {sd:.4f}" for m, sd in zip(d[f"{k}_mean"], d[f"{k}_std"])]
-    paper = {"Chinee Apple": 0.885, "Snake Weed": 0.888}
-    d["paper_recall"] = d["class"].map(paper)
+    paper = {"chinee apple": 0.885, "snake weed": 0.888}
+    d["paper_recall"] = d["class"].astype(str).str.lower().map(paper)
     return d[["config", "class", "support", "precision", "recall", "f1", "paper_recall"]]
 
 
@@ -922,7 +927,7 @@ DEFAULT_HIGHLIGHT = {
     "Training": "val_macro_f1",
     "Inference": "val_macro_f1",
     "Final": lambda d: d.index[(d.exp_id == "F01") & d.seed.astype(str).str.startswith("mean")],
-    "PerClass": lambda d: d.index[(d["config"] == "F01") & d["class"].isin(RARE.keys())],
+    "PerClass": lambda d: d.index[(d["config"] == "F01") & _is_rare(d["class"])],
     "Latency": lambda d: d.index[d.batch == 1][pd.to_numeric(d.loc[d.batch == 1, "p95_ms"]).argmin():][:1],
     "Summary": lambda d: ([pd.to_numeric(d.val_macro_f1, errors="coerce").idxmax()]
                           + list(d.index[d.exp_id.isin(["F01", "T00"]) & (d["loại"] == "chung kết (test)")])),
@@ -981,7 +986,8 @@ def consistency_check(fin_df: pd.DataFrame, pc_df: pd.DataFrame, eval_out: str |
         if sorted(int(x) for x in per.seed) != sorted(ev_sum["seeds"]):
             problems.append(f"{tag}: seed trong Final {sorted(per.seed)} != eval.py {ev_sum['seeds']}")
         for name, i in RARE.items():
-            sub = pc_df[(pc_df["config"] == tag) & (pc_df["class"] == name)] if len(pc_df) else pc_df
+            sub = (pc_df[(pc_df["config"] == tag) & (pc_df["class"].astype(str).str.lower() == name.lower())]
+                   if len(pc_df) else pc_df)
             if len(sub):
                 a, b = float(sub["recall_mean"].iloc[0]), float(ev_sum["recall"]["mean"][i])
                 if abs(a - b) > tol:
